@@ -1,0 +1,155 @@
+/**
+ * Browser-side client for the BLINK API.
+ *
+ * The web app never handles private keys, seed phrases or spending keys. It
+ * creates payment requests, renders ZIP 321 URIs, and hands the payer off to a
+ * wallet. All blockchain state shown here comes from the API, which in turn only
+ * reports what a verification provider actually observed.
+ */
+
+export interface PublicPaymentRequest {
+  shortCode: string;
+  recipientName: string;
+  amount: string;
+  currency: 'ZEC';
+  memo: string | null;
+  network: 'testnet' | 'mainnet';
+  status: string;
+  confirmations: number;
+  txidShort: string | null;
+  expiresAt: string;
+  createdAt: string;
+}
+
+export interface CreatedPaymentRequest {
+  shortCode: string;
+  shareUrl: string;
+  zip321Uri: string;
+  request: PublicPaymentRequest;
+  managementToken: string;
+}
+
+export interface PaymentDetails {
+  shortCode: string;
+  zip321Uri: string;
+  addressKind: string | null;
+  addressFingerprint: string | null;
+  network: 'testnet' | 'mainnet';
+  status: string;
+  expiresAt: string;
+}
+
+export interface VerificationResult {
+  observed: boolean;
+  provider: string;
+  confirmations: number;
+  status: string;
+}
+
+export class ApiError extends Error {
+  constructor(
+    message: string,
+    public readonly code: string,
+    public readonly status: number,
+  ) {
+    super(message);
+    this.name = 'ApiError';
+  }
+}
+
+function baseUrl(): string {
+  return process.env.NEXT_PUBLIC_API_BASE_URL ?? 'http://localhost:4000';
+}
+
+async function request<T>(path: string, init?: RequestInit): Promise<T> {
+  const res = await fetch(`${baseUrl()}${path}`, {
+    ...init,
+    headers: { 'content-type': 'application/json', ...(init?.headers ?? {}) },
+  });
+  const text = await res.text();
+  const json = text ? (JSON.parse(text) as Record<string, unknown>) : {};
+  if (!res.ok) {
+    throw new ApiError(
+      typeof json.message === 'string' ? json.message : 'request failed',
+      typeof json.error === 'string' ? json.error : 'error',
+      res.status,
+    );
+  }
+  return json as T;
+}
+
+export interface CreateInput {
+  recipientName: string;
+  recipientAddress: string;
+  amount: string;
+  memo?: string;
+  expiryMinutes: number;
+}
+
+export const api = {
+  createPaymentRequest(input: CreateInput): Promise<CreatedPaymentRequest> {
+    return request<CreatedPaymentRequest>('/v1/payment-requests', {
+      method: 'POST',
+      body: JSON.stringify(input),
+    });
+  },
+
+  getPaymentRequest(shortCode: string): Promise<{ request: PublicPaymentRequest }> {
+    return request(`/v1/payment-requests/${encodeURIComponent(shortCode)}`);
+  },
+
+  getPaymentDetails(shortCode: string): Promise<PaymentDetails> {
+    return request(`/v1/payment-requests/${encodeURIComponent(shortCode)}/payment-details`);
+  },
+
+  initiate(shortCode: string): Promise<{ request: PublicPaymentRequest }> {
+    return request(`/v1/payment-requests/${encodeURIComponent(shortCode)}/initiate`, {
+      method: 'POST',
+      body: '{}',
+    });
+  },
+
+  claimTxid(
+    shortCode: string,
+    txid: string,
+  ): Promise<{ request: PublicPaymentRequest; note: string }> {
+    return request(`/v1/payment-requests/${encodeURIComponent(shortCode)}/transactions`, {
+      method: 'POST',
+      body: JSON.stringify({ txid }),
+    });
+  },
+
+  verify(
+    shortCode: string,
+  ): Promise<{ request: PublicPaymentRequest; verification: VerificationResult }> {
+    return request(`/v1/payment-requests/${encodeURIComponent(shortCode)}/verify`, {
+      method: 'POST',
+      body: '{}',
+    });
+  },
+
+  cancel(shortCode: string, managementToken: string): Promise<{ request: PublicPaymentRequest }> {
+    return request(`/v1/payment-requests/${encodeURIComponent(shortCode)}/cancel`, {
+      method: 'POST',
+      headers: { 'x-blink-management-token': managementToken },
+      body: '{}',
+    });
+  },
+
+  receipt(shortCode: string): Promise<{ receipt: Receipt }> {
+    return request(`/v1/payment-requests/${encodeURIComponent(shortCode)}/receipt`);
+  },
+};
+
+export interface Receipt {
+  shortCode: string;
+  amount: string;
+  currency: string;
+  memo: string | null;
+  network: string;
+  status: string;
+  txid: string | null;
+  confirmations: number;
+  paidAt: string;
+  statement: string;
+}

@@ -1,0 +1,71 @@
+name: E2E
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: e2e-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  playwright:
+    name: Playwright end-to-end
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: blink
+          POSTGRES_PASSWORD: blink_dev_pw
+          POSTGRES_DB: blink
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U blink"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      DATABASE_URL: postgres://blink:blink_dev_pw@127.0.0.1:5432/blink
+      ZCASH_NETWORK: testnet
+      NEXT_PUBLIC_NETWORK: testnet
+      APP_BASE_URL: http://localhost:3000
+      BLINK_ZCASH_SERVICE_URL: ''
+      BLINK_VERIFICATION_PROVIDER: none
+      BLINK_ENCRYPTION_KEY: ${{ secrets.BLINK_TEST_ENCRYPTION_KEY || '0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f' }}
+      NEXT_PUBLIC_API_BASE_URL: http://localhost:4000
+      PORT: '4000'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+      - run: npm ci
+      - name: Build
+        run: npm run build
+      - name: Migrate database
+        run: npm run db:migrate -w @blink/api
+      - name: Install Playwright browser
+        run: npx playwright install --with-deps chromium
+      - name: Start API
+        run: node apps/api/dist/server.js > /tmp/api.log 2>&1 &
+      - name: Start web
+        run: npm run start -w @blink/web > /tmp/web.log 2>&1 &
+      - name: Wait for services
+        run: npx wait-on http://localhost:4000/health http://localhost:3000 --timeout 60000
+      - name: Run E2E tests
+        run: npm run test:e2e
+      - name: Upload report on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: playwright-report/
+          retention-days: 7

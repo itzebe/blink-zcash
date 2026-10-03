@@ -1,0 +1,32 @@
+[package]
+name = "blink-zcash"
+version = "0.1.0"
+edition = "2021"
+description = "Authoritative Zcash address and ZIP 321 payment-request engine for BLINK, built on the official zcash Rust crates."
+license = "MIT"
+repository = "https://github.com/itzebe/blink-zcash"
+
+[[bin]]
+name = "blink-zcash"
+path = "src/main.rs"
+
+[lib]
+name = "blink_zcash"
+path = "src/lib.rs"
+
+[dependencies]
+# Official Zcash Rust crates. These provide the canonical implementation of
+# ZIP 321 and Zcash address encoding. BLINK does not reimplement either.
+zip321 = "0.9.0"
+zcash_address = "0.13.0"
+zcash_protocol = "0.10.5"
+
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+axum = "0.7"
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "signal"] }
+tower-http = { version = "0.5", features = ["trace", "cors"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+[dev-dependencies]

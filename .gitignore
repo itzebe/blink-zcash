@@ -1,0 +1,56 @@
+# Dependencies
+node_modules/
+.pnp
+.pnp.js
+
+# Build output
+dist/
+build/
+.next/
+out/
+target/
+
+# Test output
+coverage/
+test-results/
+playwright-report/
+blob-report/
+*.tsbuildinfo
+
+# Environment — never commit real values
+.env
+.env.local
+.env.*.local
+.env.production
+!.env.example
+
+# Secrets and credentials
+*.pem
+*.key
+*.p12
+secrets/
+credentials.json
+
+# Wallet databases — never commit
+*.wallet
+*.sqlite
+*.sqlite3
+wallet.dat
+zcash/
+.zcash/
+
+# Logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Editors / OS
+.DS_Store
+.idea/
+.vscode/
+*.swp
+
+# Misc
+.cache/
+.turbo/
