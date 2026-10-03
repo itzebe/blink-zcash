@@ -26,6 +26,11 @@ export interface EngineResult<T> {
   authoritative: boolean;
 }
 
+export interface TransactionInfo {
+  txid: string;
+  size: number;
+}
+
 export interface ZcashEngine {
   readonly configured: boolean;
   inspectAddress(address: string, network: ZcashNetwork): Promise<EngineResult<InspectResult>>;
@@ -39,6 +44,11 @@ export interface ZcashEngine {
     }>,
     network: ZcashNetwork,
   ): Promise<EngineResult<string>>;
+  /**
+   * Decode raw transaction bytes and return the authoritative txid computed by
+   * the official Zcash crates. Never fabricates a result: malformed bytes throw.
+   */
+  decodeTransaction(dataHex: string, branch?: string): Promise<EngineResult<TransactionInfo>>;
 }
 
 export class EngineUnavailableError extends Error {
@@ -107,6 +117,20 @@ export function createZcashEngine(serviceUrl: string, timeoutMs = 3000): ZcashEn
       }
       const json = await call<{ uri: string }>('/v1/zip321/build', { payments, network });
       return { value: json.uri, authoritative: true };
+    },
+
+    async decodeTransaction(dataHex, branch) {
+      if (!configured) {
+        throw new EngineUnavailableError('BLINK_ZCASH_SERVICE_URL is not configured');
+      }
+      const json = await call<{ txid: string; size: number }>('/v1/transaction/inspect', {
+        data: dataHex,
+        ...(branch ? { branch } : {}),
+      });
+      return {
+        value: { txid: json.txid, size: json.size },
+        authoritative: true,
+      };
     },
   };
 }

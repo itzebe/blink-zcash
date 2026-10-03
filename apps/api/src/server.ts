@@ -51,6 +51,8 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<BuiltApp>
       rpcUrl: config.ZCASH_RPC_URL,
       rpcUser: config.ZCASH_RPC_USER,
       rpcPassword: config.ZCASH_RPC_PASSWORD,
+      network: config.ZCASH_NETWORK,
+      engine,
     });
 
   const service = new PaymentService({

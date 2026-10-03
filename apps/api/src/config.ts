@@ -77,6 +77,16 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     }
   }
 
+  // A named provider with no endpoint would silently degrade to "observe
+  // nothing". Refuse in every environment, so the operator knows verification is
+  // not actually configured.
+  if (parsed.BLINK_VERIFICATION_PROVIDER === 'lightwalletd' && !parsed.BLINK_LIGHTWALLETD_URL) {
+    throw new Error('BLINK_VERIFICATION_PROVIDER=lightwalletd requires BLINK_LIGHTWALLETD_URL');
+  }
+  if (parsed.BLINK_VERIFICATION_PROVIDER === 'node-rpc' && !parsed.ZCASH_RPC_URL) {
+    throw new Error('BLINK_VERIFICATION_PROVIDER=node-rpc requires ZCASH_RPC_URL');
+  }
+
   return {
     ...parsed,
     isProduction,

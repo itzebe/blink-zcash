@@ -14,6 +14,7 @@ text shipped with each dependency.
 | `zip321` | ZIP 321 payment request URIs | MIT / Apache-2.0 |
 | `zcash_address` | Transparent / Sapling / Unified address parsing | MIT / Apache-2.0 |
 | `zcash_protocol` | `Zatoshis`, `MemoBytes`, consensus types | MIT / Apache-2.0 |
+| `zcash_primitives` | Authoritative transaction decoding and txid derivation | MIT / Apache-2.0 |
 | `bech32`, `bs58`, `f4jumble`, `blake2b_simd` | Address encoding primitives (pulled in transitively) | permissive (MIT/Apache-2.0) |
 
 These are maintained under the `zcash` GitHub organisation. BLINK pins specific
@@ -34,6 +35,7 @@ implementations rather than reimplementing cryptography.
 | `zod` | Schema validation | MIT |
 | `@noble/hashes` | Hashing primitives | MIT |
 | `@scure/base` | Base encoding primitives | MIT |
+| `@grpc/grpc-js`, `@grpc/proto-loader` | lightwalletd gRPC client | Apache-2.0 |
 
 ## Development / test tooling
 

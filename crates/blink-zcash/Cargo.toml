@@ -18,6 +18,7 @@ path = "src/lib.rs"
 # Official Zcash Rust crates. These provide the canonical implementation of
 # ZIP 321 and Zcash address encoding. BLINK does not reimplement either.
 zip321 = "0.9.0"
+zcash_primitives = "0.30.1"
 zcash_address = "0.13.0"
 zcash_protocol = "0.10.5"
 

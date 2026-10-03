@@ -59,6 +59,7 @@ impl IntoResponse for ApiError {
             Error::InvalidMemo(_) => "invalid_memo",
             Error::Zip321(_) => "invalid_zip321",
             Error::Payment(_) => "invalid_payment",
+            Error::Transaction(_) => "invalid_transaction",
         };
         let status = match err {
             Error::InvalidNetwork(_) => StatusCode::BAD_REQUEST,
@@ -142,6 +143,42 @@ struct ParseRequest {
     network: Option<String>,
 }
 
+#[derive(Debug, Deserialize)]
+struct InspectTransactionRequest {
+    /// Raw transaction bytes, hex encoded. The `0x` prefix is optional.
+    data: String,
+    /// Optional consensus branch name (e.g. "sapling", "nu5"). When omitted a
+    /// version-appropriate default is used.
+    #[serde(default)]
+    branch: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+struct InspectTransactionResponse {
+    txid: String,
+    size: usize,
+}
+
+async fn inspect_transaction(
+    Json(req): Json<InspectTransactionRequest>,
+) -> Result<Json<InspectTransactionResponse>, ApiError> {
+    let hex = req.data.trim().trim_start_matches("0x");
+    if hex.is_empty() || hex.len() % 2 != 0 || !hex.bytes().all(|b| b.is_ascii_hexdigit()) {
+        return Err(ApiError::from(Error::Transaction(
+            "data must be an even-length hex string".to_string(),
+        )));
+    }
+    let bytes: Vec<u8> = (0..hex.len())
+        .step_by(2)
+        .map(|i| u8::from_str_radix(&hex[i..i + 2], 16).expect("validated hex"))
+        .collect();
+    let info = blink_zcash::decode_transaction(&bytes, req.branch.as_deref())?;
+    Ok(Json(InspectTransactionResponse {
+        txid: info.txid,
+        size: info.size,
+    }))
+}
+
 async fn parse(
     State(state): State<AppState>,
     Json(req): Json<ParseRequest>,
@@ -160,6 +197,7 @@ fn app(state: AppState) -> Router {
         .route("/v1/address/inspect", post(inspect))
         .route("/v1/zip321/build", post(build))
         .route("/v1/zip321/parse", post(parse))
+        .route("/v1/transaction/inspect", post(inspect_transaction))
         .layer(TraceLayer::new_for_http())
         .with_state(state)
 }

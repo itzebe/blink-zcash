@@ -86,8 +86,13 @@ Providers:
 
 - `none` (default): reports `UNKNOWN`, honestly.
 - `node-rpc`: queries a zcashd JSON-RPC endpoint for a claimed txid.
-- `lightwalletd`: a documented stub that refuses to report anything until it is
-  genuinely implemented.
+- `lightwalletd`: uses the lightwalletd `CompactTxStreamer` gRPC API. It confirms
+  the endpoint serves the configured network, fetches the reported transaction,
+  derives the real txid from the returned bytes with the authoritative Zcash
+  engine (rejecting the observation unless it matches the claim), and computes
+  confirmations from the chain tip. It requires `BLINK_LIGHTWALLETD_URL` and
+  `BLINK_ZCASH_SERVICE_URL`, and reports nothing when either is missing or
+  unreachable.
 
 ## Why BLINK does not weaken privacy for verification
 

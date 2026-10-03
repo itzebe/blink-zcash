@@ -202,6 +202,8 @@ All configuration is via the environment; nothing is hard-coded. See
 | `BLINK_ENCRYPTION_KEY` | 32-byte hex; encrypts addresses at rest; required in production |
 | `BLINK_ZCASH_SERVICE_URL` | URL of the Rust engine |
 | `BLINK_VERIFICATION_PROVIDER` | `none` (default), `node-rpc`, or `lightwalletd` |
+| `BLINK_LIGHTWALLETD_URL` | lightwalletd gRPC endpoint; required when the provider is `lightwalletd` |
+| `BLINK_CONFIRMATIONS_REQUIRED` | confirmations before a payment reads `CONFIRMED` (default `1`) |
 | `ZCASH_RPC_URL` / `ZCASH_RPC_USER` / `ZCASH_RPC_PASSWORD` | full-node RPC, if used |
 | `NEXT_PUBLIC_API_BASE_URL` | API base for the web app |
 
@@ -217,6 +219,18 @@ BLINK defaults to testnet. The safest way to exercise the full flow is to create
 a testnet wallet in a Zcash-compatible wallet, fund it from a testnet faucet, and
 pay a BLINK request with it. No mainnet configuration is required, and none is
 enabled by default.
+
+> **Verification status — read before trusting a status.**
+> BLINK's testnet verification path has been exercised end to end against **real
+> testnet data**: a real mined transaction was observed through a real
+> lightwalletd endpoint, its bytes were decoded by the Rust engine to the
+> canonical txid, and confirmations were derived from the chain tip — driving
+> `WAITING_FOR_PAYMENT → TRANSACTION_CREATED → CONFIRMING → CONFIRMED`.
+> What has **not** been performed in the development environment is a *fresh*
+> wallet-to-BLINK payment (a newly signed and broadcast transaction from a funded
+> wallet); no funded testnet wallet was available there. The exact evidence and
+> the reproducible scripts are recorded in
+> [`docs/live-testnet-verification.md`](docs/live-testnet-verification.md).
 
 Create the database and apply migrations:
 
@@ -276,6 +290,10 @@ npm run build           # packages, API, and web
 cargo build --release --manifest-path crates/blink-zcash/Cargo.toml
 ```
 
+> `next build` must run with the standard production environment. If your shell
+> has `NODE_ENV=development` exported (for example after sourcing a `.env`),
+> unset it first: `env -u NODE_ENV npm run build`.
+
 Serve the API with `node apps/api/dist/server.js` and the web app with
 `next start`. Set `NODE_ENV=production`, a real `BLINK_ENCRYPTION_KEY`, a real
 `DATABASE_URL`, and a configured verification provider if you intend to use
@@ -300,12 +318,17 @@ Full detail: [`SECURITY.md`](SECURITY.md) and
 
 ## 17. Limitations
 
-- **Shielded verification is limited.** Without a viewing key or lightwalletd
-  integration, BLINK can only confirm that a reported transaction a payer claims
-  to have made has been mined. It cannot prove the amount or the parties. It says
-  so rather than guessing.
-- **`lightwalletd` provider is a documented stub.** It refuses to report anything
-  until genuinely wired up.
+- **Verification depends on infrastructure.** BLINK can only confirm a reported
+  transaction once it can reach a lightwalletd endpoint (or full node). If none
+  is configured or reachable, BLINK reports `UNKNOWN` and never confirms. Even
+  then, for shielded payments it can only confirm that the transaction exists and
+  is mined to the required depth; it cannot prove amount or parties from public
+  data. It says so rather than guessing.
+- **`lightwalletd` provider is real but requires an endpoint.** It talks to the
+  `CompactTxStreamer` gRPC API, decodes the returned transaction with the
+  authoritative Zcash engine to bind the bytes to the claimed txid, and derives
+  confirmations from the chain tip. It needs `BLINK_LIGHTWALLETD_URL` and a
+  configured `BLINK_ZCASH_SERVICE_URL`; without either it reports nothing.
 - **Expiry is a BLINK-layer concept.** A BLINK request expiring does not make a
   blockchain transaction impossible; it only stops BLINK from presenting it as
   payable.
@@ -329,7 +352,7 @@ relevant ZIP), the documentation will say exactly what is disclosed.
 
 ## 19. Roadmap
 
-- Live `lightwalletd` integration with viewing-key-based note detection.
+- Viewing-key-based note detection (proving amount/recipient for shielded notes).
 - Deep links / detection for specific Zcash wallets.
 - Mainnet hardening and a documented enablement checklist.
 - Selective disclosure via an official Zcash mechanism, clearly documented.

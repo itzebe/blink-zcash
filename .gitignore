@@ -36,8 +36,10 @@ credentials.json
 *.sqlite
 *.sqlite3
 wallet.dat
-zcash/
-.zcash/
+# Zcash node/wallet data directories, but only at the repo root. A bare `zcash/`
+# would also hide the legitimate packages/zcash workspace package.
+/zcash/
+/.zcash/
 
 # Logs
 *.log

@@ -15,10 +15,16 @@
 //! before it is accepted or returned.
 
 use std::fmt;
+use std::io::Cursor;
 
 use serde::{Deserialize, Serialize};
 use zcash_address::{ConversionError, TryFromAddress, ZcashAddress};
-use zcash_protocol::{consensus::NetworkType, memo::MemoBytes, value::Zatoshis};
+use zcash_primitives::transaction::Transaction;
+use zcash_protocol::{
+    consensus::{BranchId, NetworkType},
+    memo::MemoBytes,
+    value::Zatoshis,
+};
 use zip321::{Payment, TransactionRequest};
 
 pub const ZATOSHIS_PER_ZEC: u64 = 100_000_000;
@@ -39,6 +45,7 @@ pub enum Error {
     InvalidMemo(String),
     Zip321(String),
     Payment(String),
+    Transaction(String),
 }
 
 impl fmt::Display for Error {
@@ -59,6 +66,7 @@ impl fmt::Display for Error {
             Error::InvalidMemo(e) => write!(f, "invalid memo: {e}"),
             Error::Zip321(e) => write!(f, "invalid ZIP 321 payment request: {e}"),
             Error::Payment(e) => write!(f, "invalid payment: {e}"),
+            Error::Transaction(e) => write!(f, "invalid transaction: {e}"),
         }
     }
 }
@@ -424,6 +432,70 @@ pub fn parse_uri(uri: &str, network: Option<BlinkNetwork>) -> Result<Vec<ParsedP
         });
     }
     Ok(out)
+}
+
+/* -------------------------------------------------------------------------- */
+/* Transaction decoding                                                       */
+/* -------------------------------------------------------------------------- */
+
+/// Consensus branch to assume when deserialising a transaction. A transaction
+/// serialisation is self-describing for header fields, but pre-v5 versions use
+/// the supplied branch to decide whether Overwinter/Sapling fields are present.
+/// Block 419200 is the Sapling activation height on both mainnet and testnet, so
+/// every V4-and-earlier transaction we may encounter (including the librustzcash
+/// reference vector from testnet block 280003) decodes correctly, while V5/V6
+/// (NU5 and later) carry their flags explicitly and ignore this value.
+fn default_branch_for_decode() -> BranchId {
+    BranchId::Sapling
+}
+
+fn parse_branch(name: &str) -> Option<BranchId> {
+    Some(match name.to_ascii_lowercase().as_str() {
+        "sprout" => BranchId::Sprout,
+        "overwinter" => BranchId::Overwinter,
+        "sapling" => BranchId::Sapling,
+        "blossom" => BranchId::Blossom,
+        "heartwood" => BranchId::Heartwood,
+        "canopy" => BranchId::Canopy,
+        "nu5" => BranchId::Nu5,
+        "nu6" => BranchId::Nu6,
+        "nu6.1" | "nu6_1" => BranchId::Nu6_1,
+        "nu6.2" | "nu6_2" => BranchId::Nu6_2,
+        "nu6.3" | "nu6_3" => BranchId::Nu6_3,
+        _ => return None,
+    })
+}
+
+/// The authoritative details of a decoded Zcash transaction.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TransactionInfo {
+    /// The canonical transaction id (big-endian hex), computed from the bytes.
+    pub txid: String,
+    pub size: usize,
+}
+
+/// Decode raw Zcash transaction bytes and return the real txid.
+///
+/// The txid is derived from the transaction itself using the official
+/// `zcash_primitives` implementation, so a caller cannot substitute an arbitrary
+/// hash. This is what lets BLINK bind a lightwalletd `GetTransaction` response
+/// to a verifiable transaction id rather than trusting a client-supplied value.
+///
+/// The mined height is deliberately not returned: transaction bytes do not carry
+/// it. It is supplied by lightwalletd's `RawTransaction.height`, which the caller
+/// must translate into confirmations against the current chain tip.
+pub fn decode_transaction(data: &[u8], branch: Option<&str>) -> Result<TransactionInfo> {
+    let branch = match branch {
+        Some(name) => parse_branch(name)
+            .ok_or_else(|| Error::Transaction(format!("unknown branch: {name}")))?,
+        None => default_branch_for_decode(),
+    };
+    let tx = Transaction::read(Cursor::new(data), branch)
+        .map_err(|e| Error::Transaction(format!("could not decode: {e}")))?;
+    Ok(TransactionInfo {
+        txid: tx.txid().to_string(),
+        size: data.len(),
+    })
 }
 
 /* -------------------------------------------------------------------------- */
