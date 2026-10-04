@@ -91,24 +91,45 @@ export default function ScanPage() {
     <Shell>
       <TopBar network={NETWORK} />
       <form className="stack" onSubmit={handleParse}>
-        <div className="stack stack--sm">
-          <p className="kicker">Scan or paste</p>
-          <h1>Open a payment request.</h1>
+        <div className="stack stack--sm" style={{ textAlign: 'center' }}>
+          <p className="kicker">SCAN BLINK</p>
+          <h1>Point your camera at a Blink payment QR</h1>
           <p className="lede">
-            Paste a BLINK link or a ZIP 321 payment request. Nothing is paid until you confirm.
+            Or paste a Blink link or ZIP 321 payment request below. Nothing is paid until you confirm.
           </p>
+        </div>
+
+        {/* Elegant Scanner Frame Visual */}
+        <div className="card card--accent center" style={{ padding: '32px 24px', background: 'var(--surface-solid)' }}>
+          <div
+            style={{
+              width: 180,
+              height: 180,
+              margin: '0 auto 16px',
+              borderRadius: 20,
+              border: '2px dashed var(--accent)',
+              display: 'grid',
+              placeItems: 'center',
+              boxShadow: '0 0 30px var(--accent-glow)',
+              position: 'relative',
+              overflow: 'hidden',
+            }}
+          >
+            <span style={{ fontSize: 48, opacity: 0.8 }}>▣</span>
+          </div>
+          <p className="tiny muted">Align QR code within the frame or paste the request link</p>
         </div>
 
         {error ? <Alert kind="error">{error}</Alert> : null}
 
         <div className="field">
           <label className="field__label" htmlFor="payload">
-            Payment link or request
+            Paste payment link or request
           </label>
           <textarea
             id="payload"
             className="textarea input--mono"
-            placeholder={'blink.app/pay/8K4Q2X\nor zcash:u1…?amount=25&memo=…'}
+            placeholder={'https://blink-web.onrender.com/pay/8K4Q2X\nor zcash:u1…?amount=25&memo=…'}
             spellCheck={false}
             autoComplete="off"
             value={input}
@@ -117,7 +138,7 @@ export default function ScanPage() {
         </div>
 
         <button className="btn btn--primary" type="submit" disabled={!input.trim()}>
-          {result ? 'Parse again' : 'Read request'}
+          {result ? 'Parse again' : 'Open request'}
         </button>
       </form>
 

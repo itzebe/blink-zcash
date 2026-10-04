@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { Shell, TopBar, Alert, Row, StatusBadge } from '@/components/Shell';
+import { BlinkPaymentCard } from '@/components/BlinkPaymentCard';
 import { api, ApiError, type PaymentDetails, type PublicPaymentRequest } from '@/lib/api';
 import { statusLabel, statusTone, statusIsVerified } from '@/lib/status';
 
@@ -357,35 +358,39 @@ export default function PayPage({ params }: { params: Promise<{ shortCode: strin
     <Shell>
       <TopBar network={network} />
       <div className="stack">
-        <div className="stack stack--sm">
-          <p className="kicker">Pay privately</p>
-          <h1 className="amount-hero">
-            {request.amount}
-            <span>ZEC</span>
-          </h1>
+        <div className="stack stack--sm" style={{ textAlign: 'center' }}>
+          <p className="kicker">Private Payment Request</p>
+          <h1>{request.recipientName} requested a payment</h1>
         </div>
 
-        <div className="card">
-          <Row label="For">{request.memo ?? 'Payment'}</Row>
-          <Row label="Recipient">{request.recipientName}</Row>
-          <Row label="Privacy">Shielded payment</Row>
-          <Row label="Status">
-            <StatusBadge
-              status={request.status}
-              label={statusLabel(request.status)}
-              tone={statusTone(request.status)}
-            />
-          </Row>
-        </div>
-
-        {notice ? <Alert kind="warn">{notice}</Alert> : null}
-
-        <button className="btn btn--primary" onClick={openConfirm}>
-          Pay with Zcash
-        </button>
-        <button className="btn btn--ghost" onClick={copyUri} disabled={!details}>
-          {copied ? 'Copied' : 'Copy payment request'}
-        </button>
+        {/* Digital Payment Card Confirmation Screen */}
+        <BlinkPaymentCard
+          amount={request.amount}
+          currency="ZEC"
+          memo={request.memo}
+          recipientName={request.recipientName}
+          network={network}
+          status={request.status}
+          statusLabel={statusLabel(request.status)}
+          statusTone={statusTone(request.status)}
+          actions={
+            <>
+              <button type="button" className="btn btn--primary" onClick={openConfirm}>
+                Pay with Zcash
+              </button>
+              <button
+                type="button"
+                className="btn btn--ghost"
+                onClick={copyUri}
+                disabled={!details}
+              >
+                {copied ? 'Copied request' : 'Copy request'}
+              </button>
+            </>
+          }
+        >
+          {notice ? <Alert kind="warn">{notice}</Alert> : null}
+        </BlinkPaymentCard>
 
         {details ? (
           <details className="tech">
@@ -402,8 +407,8 @@ export default function PayPage({ params }: { params: Promise<{ shortCode: strin
           </details>
         ) : null}
 
-        <p className="tiny muted">
-          BLINK never asks for your seed phrase or private key, and never touches your funds.
+        <p className="tiny muted center">
+          PRIVATE PAYMENT · Protected by Zcash shielded protocol
         </p>
       </div>
     </Shell>
