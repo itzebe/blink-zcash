@@ -1,0 +1,171 @@
+# Render Blueprint for BLINK - https://render.com/docs/blueprint-spec
+#
+# Provisions four things for the existing monorepo:
+#   1. blink-web     - Next.js front end (public URL)
+#   2. blink-api     - Fastify API (public URL)
+#   3. blink-engine  - authoritative Rust `blink-zcash` engine (public URL)
+#   4. a PostgreSQL connection (DATABASE_URL)
+#
+# This file contains NO secrets. Every secret is declared with `sync: false`,
+# which makes Render prompt for the value in the Dashboard on first deploy.
+#
+# Deployment URLs are never hard-coded: services reference each other through
+# Render's `fromService`/`RENDER_EXTERNAL_URL`, so the wiring survives renames.
+#
+# Database: the target is Neon PostgreSQL, so DATABASE_URL is a `sync: false`
+# value you paste from Neon (append `?sslmode=require`). If you would rather use
+# a Render-managed Postgres instead, delete the DATABASE_URL entry below and
+# uncomment the `databases:` block at the bottom of this file, then change the
+# DATABASE_URL entry to:
+#
+#     - key: DATABASE_URL
+#       fromDatabase:
+#         name: blink-db
+#         property: connectionString
+#
+# Free-tier notes (verified against Render's docs):
+#   * Free web services run with 512 MB RAM / 0.1 CPU. BLINK's services fit with
+#     room to spare (measured: web ~107 MB, API ~250 MB, engine ~5 MB idle).
+#   * Builds run on the build pipeline, which is SEPARATE compute from the
+#     running service. Hobby workspaces always use the Starter pipeline tier
+#     (2 CPU / 8 GB RAM), so the Rust engine's Zcash dependency tree compiles
+#     without the 512 MB runtime limit applying to the build.
+#   * Free web services spin down after ~15 minutes idle and cold-start on the
+#     next request. They also have no shell and no pre-deploy command, which is
+#     why the API runs its (idempotent) migrations as part of its start command.
+#   * Private networking: per Render's docs, free web services CAN SEND private
+#     network requests but CANNOT RECEIVE them. A paid instance would be needed
+#     for the engine to accept private traffic, so to stay at $0 the API reaches
+#     the engine over the engine's public HTTPS URL. This is still an internal
+#     service-to-service call; Render only exposes it publicly, it is not linked
+#     from the web app, and the engine holds no secrets. All three services are
+#     in the same region (Ohio) as required for private networking to be usable
+#     if the engine is ever moved to a paid instance.
+#   * Free services must bind to the `PORT` Render injects (default 10000).
+
+services:
+  # ---------------------------------------------------------------------------
+  # Web - Next.js. NEXT_PUBLIC_* variables are inlined at BUILD time, so the API
+  # URL must be present during the build. It is resolved from the API service.
+  # ---------------------------------------------------------------------------
+  - type: web
+    name: blink-web
+    runtime: node
+    plan: free
+    region: ohio
+    rootDir: .
+    buildCommand: npm ci && npm run build:packages && npm run build -w @blink/web
+    startCommand: npm run start -w @blink/web
+    healthCheckPath: /
+    autoDeployTrigger: commit
+    envVars:
+      - key: NODE_VERSION
+        value: "22"
+      - key: NODE_ENV
+        value: production
+      # Must match the API's ZCASH_NETWORK. Used only to label the session.
+      - key: NEXT_PUBLIC_NETWORK
+        value: testnet
+      # Build-time: the browser calls this API URL directly.
+      - key: NEXT_PUBLIC_API_BASE_URL
+        fromService:
+          type: web
+          name: blink-api
+          envVarKey: RENDER_EXTERNAL_URL
+
+  # ---------------------------------------------------------------------------
+  # API - Fastify. Talks to PostgreSQL, the Rust engine, and lightwalletd.
+  # ---------------------------------------------------------------------------
+  - type: web
+    name: blink-api
+    runtime: node
+    plan: free
+    region: ohio
+    rootDir: .
+    # The API's compiled migration is idempotent (all CREATE ... IF NOT EXISTS),
+    # so it is safe to run on every start. Free services have no pre-deploy
+    # command or shell, so this is how the schema is kept current.
+    buildCommand: npm ci && npm run build:packages && npm run build -w @blink/api
+    startCommand: node apps/api/dist/db/migrate.js && node apps/api/dist/server.js
+    healthCheckPath: /health
+    autoDeployTrigger: commit
+    envVars:
+      - key: NODE_VERSION
+        value: "22"
+      - key: NODE_ENV
+        value: production
+      # Testnet only. Mainnet is opt-in and requires explicit configuration.
+      - key: ZCASH_NETWORK
+        value: testnet
+      - key: NEXT_PUBLIC_NETWORK
+        value: testnet
+      # Real blockchain verification through a testnet lightwalletd endpoint.
+      # The provider refuses any endpoint whose GetLightdInfo.chainName is not
+      # "test", so a mainnet endpoint can never satisfy a testnet request.
+      - key: BLINK_VERIFICATION_PROVIDER
+        value: lightwalletd
+      - key: BLINK_LIGHTWALLETD_URL
+        value: https://testnet.zec.rocks:443
+      - key: BLINK_CONFIRMATIONS_REQUIRED
+        value: "1"
+      # --- secrets / per-deployment values: set in the Render Dashboard -------
+      # Neon connection string, e.g.
+      #   postgresql://USER:PASSWORD@HOST/DB?sslmode=require
+      - key: DATABASE_URL
+        sync: false
+      # 32-byte hex key (64 chars) used to encrypt recipient addresses at rest.
+      # Generate: node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
+      - key: BLINK_ENCRYPTION_KEY
+        sync: false
+      # Public base URL of the web app (used to build share links). Paste the
+      # blink-web URL after the first deploy, e.g. https://blink-web.onrender.com
+      - key: APP_BASE_URL
+        sync: false
+      # Comma-separated CORS origins. Paste the blink-web URL after the first
+      # deploy, e.g. https://blink-web.onrender.com
+      - key: BLINK_ALLOWED_ORIGINS
+        sync: false
+      # --- wired automatically ------------------------------------------------
+      # Public URL of the Rust engine service.
+      - key: BLINK_ZCASH_SERVICE_URL
+        fromService:
+          type: web
+          name: blink-engine
+          envVarKey: RENDER_EXTERNAL_URL
+
+  # ---------------------------------------------------------------------------
+  # Engine - authoritative Zcash address / ZIP 321 / transaction decoding.
+  # Wraps the official Zcash Rust crates (zcash_primitives, zip321, ...).
+  # ---------------------------------------------------------------------------
+  - type: web
+    name: blink-engine
+    runtime: rust
+    plan: free
+    region: ohio
+    rootDir: crates/blink-zcash
+    buildCommand: cargo build --release
+    startCommand: ./target/release/blink-zcash
+    healthCheckPath: /health
+    autoDeployTrigger: commit
+    envVars:
+      - key: ZCASH_NETWORK
+        value: testnet
+      # Bind all interfaces so Render can route to the service.
+      - key: BLINK_ZCASH_HOST
+        value: 0.0.0.0
+      # On Render the injected PORT takes precedence over BLINK_ZCASH_PORT;
+      # BLINK_ZCASH_PORT is the fallback for non-Render / local deployments.
+      - key: BLINK_ZCASH_PORT
+        value: "10000"
+      - key: RUST_LOG
+        value: info
+
+# Uncomment to use a Render-managed Postgres instead of Neon, and switch the
+# API's DATABASE_URL entry to a `fromDatabase` reference (see the header note).
+#
+# databases:
+#   - name: blink-db
+#     databaseName: blink
+#     user: blink
+#     plan: free
+#     region: ohio
