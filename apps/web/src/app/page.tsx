@@ -11,7 +11,7 @@ const ACTIONS = [
     desc: 'Ask someone to pay you with a link',
   },
   {
-    href: '/pay',
+    href: '/scan',
     icon: '↑',
     title: 'Pay',
     desc: 'Open a payment request and pay it',
