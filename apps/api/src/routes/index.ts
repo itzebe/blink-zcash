@@ -63,9 +63,22 @@ export async function registerRoutes(app: FastifyInstance, deps: RouteDeps): Pro
     try {
       const ownerId = deps.resolveOwner ? await deps.resolveOwner(req) : null;
       const row = await service.create({ ...parsed.data, ownerId });
+      let refererOrigin: string | null = null;
+      if (req.headers.referer) {
+        try {
+          refererOrigin = new URL(req.headers.referer).origin;
+        } catch {
+          /* malformed referer header; ignore */
+        }
+      }
+      const origin = req.headers.origin || refererOrigin || config.APP_BASE_URL;
+      const baseUrl =
+        config.APP_BASE_URL && config.APP_BASE_URL !== 'http://localhost:3000'
+          ? config.APP_BASE_URL
+          : origin;
       return reply.code(201).send({
         shortCode: row.shortCode,
-        shareUrl: `${config.APP_BASE_URL}/pay/${row.shortCode}`,
+        shareUrl: `${baseUrl}/pay/${row.shortCode}`,
         zip321Uri: row.zip321Uri,
         request: service.toPublic(row),
         // Returned once; the client stores it to manage the request.

@@ -58,7 +58,10 @@ export class ApiError extends Error {
 }
 
 function baseUrl(): string {
-  return process.env.NEXT_PUBLIC_API_BASE_URL ?? 'http://localhost:4000';
+  if (process.env.NEXT_PUBLIC_API_BASE_URL) {
+    return process.env.NEXT_PUBLIC_API_BASE_URL.replace(/\/$/, '');
+  }
+  return '';
 }
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
