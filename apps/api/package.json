@@ -11,8 +11,8 @@
     "start": "node dist/server.js",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run",
-    "db:migrate": "node --experimental-strip-types src/db/migrate.ts",
-    "db:seed": "node --experimental-strip-types src/db/seed.ts"
+    "db:migrate": "node dist/db/migrate.js",
+    "db:seed": "node dist/db/seed.js"
   },
   "dependencies": {
     "@blink/payment-request": "0.1.0",
