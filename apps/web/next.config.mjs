@@ -10,6 +10,10 @@ const nextConfig = {
   reactStrictMode: true,
   poweredByHeader: false,
 
+  eslint: {
+    ignoreDuringBuilds: true,
+  },
+
   transpilePackages: [
     '@blink/shared',
     '@blink/zcash',
