@@ -69,6 +69,20 @@ Rust checks used in CI: `cargo fmt --all -- --check`,
   `useContext` prerender crash in Next 15. Keep it compatible with 19.
 - API `tsconfig` excludes tests; `buildApp` is the test entry point.
 - `.env` is git-ignored; `.env.example` has placeholders only.
+- **NU7 decode.** Zcash testnet activates NU7 (consensus branch `0x77190AD9`) in
+  October 2026. No *stable* `zcash_protocol` release defines that branch id, so
+  the engine pins the `0.11.0-pre.0` line (`zcash_primitives 0.31.0-pre.0`,
+  `zcash_address 0.14.0-pre.0`, `zip321 0.10.0-pre.0`). A stable-line engine
+  rejects live transactions and verification silently returns `observed: false`.
+  Verify with `node scripts/live-testnet-proof.mjs`.
+- **Deploy wiring.** The web app calls `/v1/*` same-origin; `next.config.mjs`
+  rewrites it to `API_BASE_URL` (server-side). Do NOT set `NEXT_PUBLIC_API_BASE_URL`
+  on Render: it inlines a cross-origin URL at build time and reintroduces CORS
+  failures. The API's `BLINK_ALLOWED_ORIGINS` is only a fallback.
+- **Memos are plaintext** (stored, shown, and encoded in the ZIP 321 URI). Only
+  the recipient address is encrypted at rest. Never claim memos are encrypted.
+- **Local `npm ci` needs `NODE_ENV=development`** (or `--include=dev`); the shell
+  here exports `NODE_ENV=production`, which skips vitest/eslint.
 
 ## Repo
 
