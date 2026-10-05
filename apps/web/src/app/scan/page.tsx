@@ -1,7 +1,8 @@
 'use client';
 
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
+import jsQR from 'jsqr';
 import { Shell, TopBar, Alert, Row } from '@/components/Shell';
 import { parseSinglePayment, Zip321Error } from '@blink/payment-request';
 import { parseAddress, type ParsedAddress } from '@blink/zcash';
@@ -66,13 +67,16 @@ export default function ScanPage() {
   const [input, setInput] = useState('');
   const [result, setResult] = useState<Parsed | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [scanning, setScanning] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const animFrameRef = useRef<number | null>(null);
 
-  function handleParse(event: React.FormEvent) {
-    event.preventDefault();
+  function handleRawPayload(raw: string) {
     setError(null);
     setResult(null);
     try {
-      const parsed = parseInput(input);
+      const parsed = parseInput(raw);
       if (parsed.kind === 'blink') {
         router.push(`/pay/${parsed.shortCode}`);
         return;
@@ -87,28 +91,202 @@ export default function ScanPage() {
     }
   }
 
+  function handleParse(event: React.FormEvent) {
+    event.preventDefault();
+    handleRawPayload(input);
+  }
+
+  async function handleGalleryImage(event: React.ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    setError(null);
+
+    // 1. Try BarcodeDetector if natively available
+    if (typeof window !== 'undefined' && 'BarcodeDetector' in window) {
+      try {
+        const BarcodeDetectorClass = (window as unknown as { BarcodeDetector: new (opts: { formats: string[] }) => { detect: (bitmap: ImageBitmap) => Promise<Array<{ rawValue: string }>> } }).BarcodeDetector;
+        const detector = new BarcodeDetectorClass({ formats: ['qr_code'] });
+        const bitmap = await createImageBitmap(file);
+        const barcodes = await detector.detect(bitmap);
+        if (barcodes.length > 0 && barcodes[0].rawValue) {
+          setInput(barcodes[0].rawValue);
+          handleRawPayload(barcodes[0].rawValue);
+          return;
+        }
+      } catch {
+        /* fallback to canvas jsQR */
+      }
+    }
+
+    // 2. Canvas fallback with jsQR
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      const img = new Image();
+      img.onload = () => {
+        const canvas = document.createElement('canvas');
+        canvas.width = img.width;
+        canvas.height = img.height;
+        const ctx = canvas.getContext('2d');
+        if (!ctx) {
+          setError('Could not process image canvas.');
+          return;
+        }
+        ctx.drawImage(img, 0, 0);
+        const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+        const code = jsQR(imageData.data, imageData.width, imageData.height);
+        if (code && code.data) {
+          setInput(code.data);
+          handleRawPayload(code.data);
+        } else {
+          setError('No QR code found in selected photo. Try another image or paste the link.');
+        }
+      };
+      img.onerror = () => setError('Could not load image file.');
+      img.src = e.target?.result as string;
+    };
+    reader.readAsDataURL(file);
+  }
+
+  async function startCameraScanner() {
+    setError(null);
+    setScanning(true);
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: 'environment' },
+      });
+      if (videoRef.current) {
+        videoRef.current.srcObject = stream;
+        videoRef.current.setAttribute('playsinline', 'true');
+        await videoRef.current.play();
+        scanVideoLoop();
+      }
+    } catch (err) {
+      setScanning(false);
+      setError(
+        err instanceof Error
+          ? `Camera access error: ${err.message}`
+          : 'Could not access camera. Try selecting a QR photo from gallery instead.',
+      );
+    }
+  }
+
+  function stopCameraScanner() {
+    setScanning(false);
+    if (animFrameRef.current) cancelAnimationFrame(animFrameRef.current);
+    if (videoRef.current && videoRef.current.srcObject) {
+      const stream = videoRef.current.srcObject as MediaStream;
+      stream.getTracks().forEach((track) => track.stop());
+      videoRef.current.srcObject = null;
+    }
+  }
+
+  function scanVideoLoop() {
+    if (!videoRef.current || videoRef.current.readyState !== videoRef.current.HAVE_ENOUGH_DATA) {
+      animFrameRef.current = requestAnimationFrame(scanVideoLoop);
+      return;
+    }
+
+    const video = videoRef.current;
+    const canvas = document.createElement('canvas');
+    canvas.width = video.videoWidth;
+    canvas.height = video.videoHeight;
+    const ctx = canvas.getContext('2d');
+    if (ctx) {
+      ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+      const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+      const code = jsQR(imageData.data, imageData.width, imageData.height);
+      if (code && code.data) {
+        stopCameraScanner();
+        setInput(code.data);
+        handleRawPayload(code.data);
+        return;
+      }
+    }
+    animFrameRef.current = requestAnimationFrame(scanVideoLoop);
+  }
+
   return (
     <Shell>
       <TopBar network={NETWORK} />
       <form className="stack" onSubmit={handleParse}>
-        <div className="stack stack--sm">
-          <p className="kicker">Scan or paste</p>
-          <h1>Open a payment request.</h1>
+        <div className="stack stack--sm" style={{ textAlign: 'center' }}>
+          <p className="kicker">SCAN BLINK</p>
+          <h1>Point your camera at a Blink payment QR</h1>
           <p className="lede">
-            Paste a BLINK link or a ZIP 321 payment request. Nothing is paid until you confirm.
+            Or paste a Blink link or ZIP 321 payment request below. Nothing is paid until you confirm.
           </p>
+        </div>
+
+        {/* Elegant Scanner Frame / Video View */}
+        <div className="card card--accent center" style={{ padding: '24px 20px', background: 'var(--surface-solid)' }}>
+          {scanning ? (
+            <div style={{ position: 'relative', borderRadius: 20, overflow: 'hidden', margin: '0 auto 16px', maxWidth: 280 }}>
+              <video ref={videoRef} style={{ width: '100%', height: 'auto', display: 'block' }} />
+              <button
+                type="button"
+                className="btn btn--danger btn--small"
+                onClick={stopCameraScanner}
+                style={{ position: 'absolute', bottom: 12, right: 12 }}
+              >
+                Stop Camera
+              </button>
+            </div>
+          ) : (
+            <div
+              style={{
+                width: 180,
+                height: 180,
+                margin: '0 auto 16px',
+                borderRadius: 20,
+                border: '2px dashed var(--accent)',
+                display: 'grid',
+                placeItems: 'center',
+                boxShadow: '0 0 30px var(--accent-glow)',
+                position: 'relative',
+                overflow: 'hidden',
+              }}
+            >
+              <span style={{ fontSize: 48, opacity: 0.8 }}>▣</span>
+            </div>
+          )}
+
+          <div className="btn-row" style={{ marginTop: 12 }}>
+            {!scanning ? (
+              <button
+                type="button"
+                className="btn btn--primary btn--small"
+                onClick={startCameraScanner}
+              >
+                📷 Start Camera Scan
+              </button>
+            ) : null}
+            <button
+              type="button"
+              className="btn btn--ghost btn--small"
+              onClick={() => fileInputRef.current?.click()}
+            >
+              🖼 Choose Photo from Gallery
+            </button>
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept="image/*"
+              style={{ display: 'none' }}
+              onChange={handleGalleryImage}
+            />
+          </div>
         </div>
 
         {error ? <Alert kind="error">{error}</Alert> : null}
 
         <div className="field">
           <label className="field__label" htmlFor="payload">
-            Payment link or request
+            Paste payment link or request
           </label>
           <textarea
             id="payload"
             className="textarea input--mono"
-            placeholder={'blink.app/pay/8K4Q2X\nor zcash:u1…?amount=25&memo=…'}
+            placeholder={'https://blink-web.onrender.com/pay/8K4Q2X\nor zcash:u1…?amount=25&memo=…'}
             spellCheck={false}
             autoComplete="off"
             value={input}
@@ -117,7 +295,7 @@ export default function ScanPage() {
         </div>
 
         <button className="btn btn--primary" type="submit" disabled={!input.trim()}>
-          {result ? 'Parse again' : 'Read request'}
+          {result ? 'Parse again' : 'Open request'}
         </button>
       </form>
 

@@ -26,6 +26,9 @@
     "db:seed": "npm run db:seed -w @blink/api",
     "format": "prettier --write \"**/*.{ts,tsx,js,json,md}\""
   },
+  "dependencies": {
+    "typescript": "5.8.2"
+  },
   "devDependencies": {
     "@eslint/js": "^9.15.0",
     "@playwright/test": "^1.48.0",
@@ -35,7 +38,6 @@
     "concurrently": "^9.0.1",
     "eslint": "^9.39.5",
     "prettier": "^3.3.3",
-    "typescript": "^5.6.3",
     "typescript-eslint": "^8.15.0",
     "vitest": "^2.1.3",
     "wait-on": "^8.0.1"
