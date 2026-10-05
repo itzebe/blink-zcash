@@ -75,18 +75,18 @@ export default function HomePage() {
           </div>
         </BlinkPaymentCard>
 
-        {/* How it works visual sections */}
+        {/* How it works visual loop */}
         <div className="stack stack--sm">
-          <p className="kicker">How BLINK works</p>
+          <p className="kicker">Request · Share · Scan · Pay</p>
           <div className="actions">
             <div className="action">
               <span className="action__icon" aria-hidden="true">
                 1
               </span>
               <div>
-                <span className="action__title">Create a payment object</span>
+                <span className="action__title">Create Request</span>
                 <span className="action__desc" style={{ display: 'block' }}>
-                  Set an amount and an optional memo. Your address stays private behind the link.
+                  Set an amount and optional memo. Your recipient address stays encrypted on the server.
                 </span>
               </div>
             </div>
@@ -95,9 +95,9 @@ export default function HomePage() {
                 2
               </span>
               <div>
-                <span className="action__title">Share the link or QR</span>
+                <span className="action__title">Share Payment Link</span>
                 <span className="action__desc" style={{ display: 'block' }}>
-                  Send the payment URL in chat or show the ZIP 321 QR code in person.
+                  Send the generated short link in chat or present the ZIP 321 QR code.
                 </span>
               </div>
             </div>
@@ -106,13 +106,47 @@ export default function HomePage() {
                 3
               </span>
               <div>
-                <span className="action__title">Payer approves in wallet</span>
+                <span className="action__title">Pay Privately</span>
                 <span className="action__desc" style={{ display: 'block' }}>
-                  The payer opens their Zcash wallet and signs the transaction privately.
+                  The payer opens their Zcash wallet and approves the transaction via shielded payment.
                 </span>
               </div>
             </div>
           </div>
+        </div>
+
+        {/* Real-World Use Cases */}
+        <div className="stack stack--sm">
+          <p className="kicker">Shielded Use Cases</p>
+          <div className="card stack stack--sm">
+            <div className="row" style={{ paddingTop: 0 }}>
+              <div>
+                <strong style={{ display: 'block', fontSize: 15 }}>Point of Sale</strong>
+                <span className="tiny muted">Merchant creates a request → customer scans QR → instant payment</span>
+              </div>
+            </div>
+            <div className="row">
+              <div>
+                <strong style={{ display: 'block', fontSize: 15 }}>Remittance & Sharing</strong>
+                <span className="tiny muted">Send a payment link in messaging apps without revealing wallet addresses</span>
+              </div>
+            </div>
+            <div className="row">
+              <div>
+                <strong style={{ display: 'block', fontSize: 15 }}>Private Payroll & Invoicing</strong>
+                <span className="tiny muted">Request exact amounts with memos encrypted end-to-end</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* Built on Zcash section */}
+        <div className="card card--accent center stack stack--sm" style={{ padding: '24px 20px' }}>
+          <p className="kicker" style={{ color: 'var(--accent)' }}>Built on Zcash Protocol</p>
+          <h2 style={{ fontSize: 18 }}>Shielded Payment Infrastructure</h2>
+          <p className="tiny muted" style={{ maxWidth: 420, margin: '0 auto' }}>
+            Zcash provides zero-knowledge cryptography that protects financial privacy. BLINK adds a clean payment request layer using ZIP 321 standards.
+          </p>
         </div>
 
         <p className="footer-note">
