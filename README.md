@@ -234,6 +234,38 @@ enabled by default.
 > the reproducible scripts are recorded in
 > [`docs/live-testnet-verification.md`](docs/live-testnet-verification.md).
 
+### Mainnet readiness
+
+The stack is network-aware. Setting `ZCASH_NETWORK=mainnet` (and matching
+`NEXT_PUBLIC_NETWORK=mainnet` on the API and web) selects mainnet end to end:
+address validation, ZIP 321 requests, the Rust engine, the lightwalletd
+provider's chain check, and the confirmation logic. Mainnet remains opt-in; in
+production the API refuses to start unless a verification provider is
+configured, and the engine refuses to start if `NEXT_PUBLIC_NETWORK` and
+`ZCASH_NETWORK` disagree.
+
+Verified against **real mainnet data without sending funds**:
+
+- the engine classifies mainnet addresses and builds/parses mainnet ZIP 321 URIs;
+- a **real mainnet transaction**, fetched from a mainnet lightwalletd endpoint,
+  decoded to its canonical txid through the deployed engine;
+- an API configured `ZCASH_NETWORK=mainnet` observed that real mainnet
+  transaction through a real mainnet lightwalletd endpoint and drove
+  `WAITING_FOR_PAYMENT → TRANSACTION_CREATED → CONFIRMED`;
+- a mainnet-configured API rejects a testnet address (`address is for testnet
+  but mainnet was expected`), and a testnet-configured API rejects a mainnet
+  address, so the two networks can never be mixed;
+- a fabricated txid never confirms (`observed: false`) and a receipt is only
+  issued for a `CONFIRMED` request.
+
+What has **not** been performed is a real funded mainnet payment (a newly signed
+and broadcast mainnet transaction from a funded wallet). That requires a funded
+mainnet wallet on the payer's device; BLINK never holds, signs, or broadcasts
+funds. The lightwalletd endpoint must serve the selected network — the provider
+checks `GetLightdInfo.chainName` (`test` for testnet, `main` for mainnet) and
+refuses to observe otherwise. BLINK does not hard-code or endorse any
+third-party endpoint; validate one before relying on it.
+
 Create the database and apply migrations:
 
 ```bash

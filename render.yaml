@@ -156,6 +156,11 @@ services:
     envVars:
       - key: ZCASH_NETWORK
         value: testnet
+      # Must match ZCASH_NETWORK (the engine refuses to start otherwise), so the
+      # selected network is explicit and a mainnet flip is a single, consistent
+      # change across all three services.
+      - key: NEXT_PUBLIC_NETWORK
+        value: testnet
       # Bind all interfaces so Render can route to the service.
       - key: BLINK_ZCASH_HOST
         value: 0.0.0.0

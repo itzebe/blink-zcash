@@ -75,6 +75,13 @@ Rust checks used in CI: `cargo fmt --all -- --check`,
   `zcash_address 0.14.0-pre.0`, `zip321 0.10.0-pre.0`). A stable-line engine
   rejects live transactions and verification silently returns `observed: false`.
   Verify with `node scripts/live-testnet-proof.mjs`.
+- **Network-aware lightwalletd check.** `verification-provider.ts` compares
+  `GetLightdInfo.chainName` against the provider's bound network via
+  `expectedChainName()` (`mainnet → "main"`, `testnet → "test"`). Do NOT hard-code
+  `'test'`: a mainnet-configured provider then rejects its own endpoint and every
+  payment silently stays unconfirmed. Mainnet readiness is verified against real
+  mainnet data without sending funds (engine decode + a real mainnet tx observed
+  through a real mainnet lightwalletd endpoint).
 - **Deploy wiring.** The web app calls `/v1/*` same-origin; `next.config.mjs`
   rewrites it to `API_BASE_URL` (server-side). Do NOT set `NEXT_PUBLIC_API_BASE_URL`
   on Render: it inlines a cross-origin URL at build time and reintroduces CORS

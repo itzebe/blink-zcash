@@ -263,6 +263,17 @@ function txidToLittleEndian(txid: string): Buffer {
 }
 
 /**
+ * The `GetLightdInfo.chainName` lightwalletd reports for a network. This is
+ * lightwalletd's own naming (not BLINK's): a testnet endpoint answers `test`, a
+ * mainnet endpoint answers `main`. Deriving it from the provider's bound network
+ * is what keeps a testnet request from ever being satisfied by a mainnet
+ * endpoint, and vice versa.
+ */
+function expectedChainName(network: ZcashNetwork): string {
+  return network === 'mainnet' ? 'main' : 'test';
+}
+
+/**
  * Real lightwalletd `CompactTxStreamer` provider.
  *
  * It observes a specific transaction the payer reported by calling the standard
@@ -270,7 +281,7 @@ function txidToLittleEndian(txid: string): Buffer {
  *
  *  1. confirms the endpoint really serves the configured network (via
  *     `GetLightdInfo.chainName`), so a mainnet endpoint can never satisfy a
- *     testnet request;
+ *     testnet request and vice versa;
  *  2. asks for the current tip (`GetLatestBlock`) so it can translate the mined
  *     height returned by lightwalletd into a real confirmation count;
  *  3. decodes the returned raw transaction with the authoritative Zcash engine
@@ -335,7 +346,7 @@ export class LightwalletdProvider implements VerificationProvider {
         client!.GetLightdInfo({}, { deadline: Date.now() + this.timeoutMs }, cb),
       );
       const chainName = String(info?.chainName ?? '').toLowerCase();
-      if (chainName !== 'test') return null;
+      if (chainName !== expectedChainName(this.network)) return null;
 
       // 2. Fetch the tip so the mined height can become a confirmation count.
       const tip = await this.unary<BlockIdReply>((cb) =>
