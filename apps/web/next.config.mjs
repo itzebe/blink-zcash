@@ -1,4 +1,5 @@
 import path from 'node:path';
+import process from 'node:process';
 import { fileURLToPath } from 'node:url';
 
 /** @type {import('next').NextConfig} */
@@ -27,6 +28,19 @@ const nextConfig = {
     };
 
     return config;
+  },
+
+  async rewrites() {
+    const apiUrl =
+      process.env.NEXT_PUBLIC_API_BASE_URL ||
+      process.env.API_BASE_URL ||
+      'http://localhost:4000';
+    return [
+      {
+        source: '/v1/:path*',
+        destination: `${apiUrl.replace(/\/$/, '')}/v1/:path*`,
+      },
+    ];
   },
 
   async headers() {

@@ -24,7 +24,16 @@ export function TopBar({ network, right }: { network: 'testnet' | 'mainnet'; rig
       <Link href="/" className="wordmark" aria-label="BLINK home">
         BLINK
       </Link>
-      {right ?? <NetworkPill network={network} />}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+        <Link
+          href="/activity"
+          className="btn btn--ghost btn--small"
+          style={{ padding: '6px 12px', minHeight: 32, fontSize: 12, borderRadius: 999 }}
+        >
+          Activity
+        </Link>
+        {right ?? <NetworkPill network={network} />}
+      </div>
     </header>
   );
 }

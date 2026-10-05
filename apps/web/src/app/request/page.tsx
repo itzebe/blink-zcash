@@ -3,7 +3,7 @@
 import { useState } from 'react';
 import Link from 'next/link';
 import { Shell, TopBar, Alert } from '@/components/Shell';
-import { QrCode } from '@/components/QrCode';
+import { BlinkPaymentCard } from '@/components/BlinkPaymentCard';
 import { api, ApiError, type CreatedPaymentRequest } from '@/lib/api';
 
 const NETWORK = (process.env.NEXT_PUBLIC_NETWORK ?? 'testnet') as 'testnet' | 'mainnet';
@@ -82,48 +82,56 @@ export default function RequestPage() {
       <Shell>
         <TopBar network={created.request.network} />
         <div className="stack">
-          <div className="stack stack--sm">
-            <p className="kicker">Payment request ready</p>
-            <h1 className="amount-hero">
-              {created.request.amount}
-              <span>ZEC</span>
-            </h1>
-            {created.request.memo ? <p className="lede">{created.request.memo}</p> : null}
-          </div>
-
-          <div className="card card--accent stack stack--sm">
-            <QrCode value={created.zip321Uri} label="ZIP 321 payment request QR code" />
-            <div className="link-box">{created.shareUrl}</div>
-            <p className="tiny muted">
-              The QR encodes a ZIP 321 payment request to your address, not a web page.
+          <div className="stack stack--sm" style={{ textAlign: 'center' }}>
+            <p className="kicker">Payment object ready</p>
+            <h1>Share your private request.</h1>
+            <p className="lede">
+              Anyone with this link can pay you. Your Zcash address stays hidden on the server.
             </p>
           </div>
 
-          <div className="btn-row">
-            <button className="btn btn--primary" onClick={share}>
-              Share
-            </button>
-            <button className="btn btn--ghost" onClick={copyLink}>
-              {copied ? 'Copied' : 'Copy link'}
-            </button>
-          </div>
+          {/* Generated Digital Payment Card */}
+          <BlinkPaymentCard
+            amount={created.request.amount}
+            currency="ZEC"
+            memo={created.request.memo}
+            recipientName={created.request.recipientName}
+            network={created.request.network}
+            status={created.request.status}
+            statusLabel="Waiting for payment"
+            statusTone="waiting"
+            zip321Uri={created.zip321Uri}
+            shareUrl={created.shareUrl}
+            actions={
+              <>
+                <button type="button" className="btn btn--primary" onClick={share}>
+                  Share
+                </button>
+                <button type="button" className="btn btn--ghost" onClick={copyLink}>
+                  {copied ? 'Copied link' : 'Copy link'}
+                </button>
+              </>
+            }
+          >
+            <div style={{ marginTop: 20, paddingTop: 16, borderTop: '1px solid var(--border)' }}>
+              <Link className="btn btn--ghost" href={`/pay/${created.shortCode}`}>
+                Open payer view →
+              </Link>
+            </div>
+          </BlinkPaymentCard>
 
           <details className="tech">
             <summary>View technical details</summary>
             <div className="tech__body">
-              <div>Encoding: ZIP 321</div>
+              <div>Encoding: ZIP 321 Payment Request URI</div>
               <div>Network: {created.request.network}</div>
+              <div>Short Code: {created.shortCode}</div>
               <div>{created.zip321Uri}</div>
             </div>
           </details>
 
-          <Link className="btn btn--ghost" href={`/pay/${created.shortCode}`}>
-            Open payer view
-          </Link>
-
-          <p className="tiny muted">
-            Expires {new Date(created.request.expiresAt).toLocaleString()}. Expiry applies to this
-            BLINK request; it does not make an on-chain payment impossible.
+          <p className="tiny muted center">
+            Expires {new Date(created.request.expiresAt).toLocaleString()}.
           </p>
         </div>
         <p className="footer-note">Non-custodial · BLINK never holds your funds</p>
