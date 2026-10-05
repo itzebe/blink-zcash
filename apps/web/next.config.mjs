@@ -55,8 +55,10 @@ const nextConfig = {
           },
           { key: 'X-Frame-Options', value: 'DENY' },
           {
+            // Camera is allowed for same-origin so the /scan page can open the
+            // QR scanner; microphone and geolocation stay disabled.
             key: 'Permissions-Policy',
-            value: 'camera=(), microphone=(), geolocation=()',
+            value: 'camera=(self), microphone=(), geolocation=()',
           },
         ],
       },

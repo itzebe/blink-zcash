@@ -66,8 +66,10 @@ services:
       # Must match the API's ZCASH_NETWORK. Used only to label the session.
       - key: NEXT_PUBLIC_NETWORK
         value: testnet
-      # Build-time: the browser calls this API URL directly.
-      - key: NEXT_PUBLIC_API_BASE_URL
+      # Server-side only: the browser calls the web app's own `/v1/*` and Next.js
+      # rewrites it to the API. Keeping this out of NEXT_PUBLIC_* means the
+      # browser never makes a cross-origin request, so CORS cannot block the app.
+      - key: API_BASE_URL
         fromService:
           type: web
           name: blink-api
@@ -121,10 +123,14 @@ services:
       # blink-web URL after the first deploy, e.g. https://blink-web.onrender.com
       - key: APP_BASE_URL
         sync: false
-      # Comma-separated CORS origins. Paste the blink-web URL after the first
+      # Comma-separated CORS origins. The web app proxies the API same-origin,
+      # so CORS is a fallback; still set it to the web origin after the first
       # deploy, e.g. https://blink-web.onrender.com
       - key: BLINK_ALLOWED_ORIGINS
-        sync: false
+        fromService:
+          type: web
+          name: blink-web
+          envVarKey: RENDER_EXTERNAL_URL
       # --- wired automatically ------------------------------------------------
       # Public URL of the Rust engine service.
       - key: BLINK_ZCASH_SERVICE_URL

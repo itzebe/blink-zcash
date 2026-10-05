@@ -19,9 +19,9 @@ test.describe('BLINK core flow', () => {
     await expect(page.getByRole('heading', { name: /send money/i })).toBeVisible();
     const titles = page.locator('.action__title');
     await expect(titles).toHaveCount(3);
-    await expect(titles.nth(0)).toHaveText('Request');
-    await expect(titles.nth(1)).toHaveText('Pay');
-    await expect(titles.nth(2)).toHaveText('Scan');
+    await expect(titles.nth(0)).toHaveText('Create Request');
+    await expect(titles.nth(1)).toHaveText('Share Payment Link');
+    await expect(titles.nth(2)).toHaveText('Pay Privately');
   });
 
   test('recipient creates a request and receives a share link and QR code', async ({ page }) => {
@@ -33,9 +33,9 @@ test.describe('BLINK core flow', () => {
     await page.getByLabel('Your Zcash address').fill(TEST_SAPLING);
     await page.getByRole('button', { name: /create payment/i }).click();
 
-    await expect(page.getByText(/payment request ready/i)).toBeVisible();
-    await expect(page.getByRole('heading', { name: '25ZEC' })).toBeVisible();
-    await expect(page.getByText('Dinner')).toBeVisible();
+    await expect(page.getByText(/payment object ready/i)).toBeVisible();
+    await expect(page.locator('.payment-card__amount-val')).toContainText('25');
+    await expect(page.locator('.payment-card__memo')).toContainText('Dinner');
 
     // The QR encodes a ZIP 321 URI, not a link to a web page.
     const qr = page.getByAltText(/ZIP 321 payment request QR code/i);
@@ -65,8 +65,8 @@ test.describe('BLINK core flow', () => {
     const body = (await created.json()) as { shortCode: string };
 
     await page.goto(`/pay/${body.shortCode}`);
-    await expect(page.getByText(/pay privately/i)).toBeVisible();
-    await expect(page.getByText('Joseph')).toBeVisible();
+    await expect(page.getByText(/private payment request/i)).toBeVisible();
+    await expect(page.getByText('Joseph', { exact: true })).toBeVisible();
 
     await page.getByRole('button', { name: /pay with zcash/i }).click();
     // Confirmation screen: nothing is sent automatically.
@@ -105,8 +105,8 @@ test.describe('BLINK core flow', () => {
 
   test('scan rejects a malformed payment request', async ({ page }) => {
     await page.goto('/scan');
-    await page.getByLabel(/payment link or request/i).fill('zcash:not-a-real-address?amount=5');
-    await page.getByRole('button', { name: /read request/i }).click();
+    await page.getByLabel(/paste payment link or request/i).fill('zcash:not-a-real-address?amount=5');
+    await page.getByRole('button', { name: /open request/i }).click();
     await expect(page.locator('.alert--error')).toBeVisible();
   });
 });

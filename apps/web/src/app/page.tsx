@@ -134,7 +134,7 @@ export default function HomePage() {
             <div className="row">
               <div>
                 <strong style={{ display: 'block', fontSize: 15 }}>Private Payroll & Invoicing</strong>
-                <span className="tiny muted">Request exact amounts with memos encrypted end-to-end</span>
+                <span className="tiny muted">Request exact amounts with a memo attached to the payment request</span>
               </div>
             </div>
           </div>

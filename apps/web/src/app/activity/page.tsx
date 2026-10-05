@@ -52,7 +52,9 @@ export default function ActivityPage() {
       return;
     }
 
-    const base = process.env.NEXT_PUBLIC_API_BASE_URL ?? 'http://localhost:4000';
+    // Same-origin: the web app rewrites /v1/* to the API server-side, so this
+    // never becomes a cross-origin request.
+    const base = process.env.NEXT_PUBLIC_API_BASE_URL?.replace(/\/$/, '') ?? '';
     Promise.all(
       codes.map(async (code) => {
         try {

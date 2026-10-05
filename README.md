@@ -205,7 +205,9 @@ All configuration is via the environment; nothing is hard-coded. See
 | `BLINK_LIGHTWALLETD_URL` | lightwalletd gRPC endpoint; required when the provider is `lightwalletd` |
 | `BLINK_CONFIRMATIONS_REQUIRED` | confirmations before a payment reads `CONFIRMED` (default `1`) |
 | `ZCASH_RPC_URL` / `ZCASH_RPC_USER` / `ZCASH_RPC_PASSWORD` | full-node RPC, if used |
-| `NEXT_PUBLIC_API_BASE_URL` | API base for the web app |
+| `NEXT_PUBLIC_API_BASE_URL` | API base for the web app. When unset, the web app calls `/v1/*` same-origin and Next.js rewrites to `API_BASE_URL` |
+| `API_BASE_URL` | API base used by the Next.js `/v1/*` rewrite (server-side) |
+| `BLINK_ALLOWED_ORIGINS` | comma-separated CORS allowlist for browser calls (default `http://localhost:3000`). A deployed web origin must be added here or every cross-origin browser request is blocked |
 
 Generate an encryption key:
 
@@ -336,6 +338,21 @@ Full detail: [`SECURITY.md`](SECURITY.md) and
   wallet handoff; deep links into specific wallets are roadmap work.
 - **Testnet only.** Mainnet requires explicit operator configuration and a
   working verification provider.
+- **Engine must understand the current consensus branch.** The Rust engine
+  decodes a returned transaction to bind its bytes to the claimed txid. Its
+  Zcash dependency must be new enough to parse the transaction version the
+  network currently produces. An engine whose decoder does not recognise the
+  current consensus branch id rejects the transaction and BLINK reports
+  `observed: false` (never a fabricated confirmation). Verify with
+  `node scripts/live-testnet-proof.mjs`.
+- **Deployment must set `BLINK_ALLOWED_ORIGINS` and enable camera.** A deployed
+  API keeps the default `http://localhost:3000` CORS allowlist unless
+  `BLINK_ALLOWED_ORIGINS` is set to the deployed web origin. The web app ships
+  `Permissions-Policy: camera=(self)` so the `/scan` camera can open; a policy
+  of `camera=()` disables it. Both are environment/deploy settings.
+- **Memos are not encrypted.** A memo is stored and displayed in plaintext and
+  is encoded in the ZIP 321 URI/QR. Only the recipient address is encrypted at
+  rest. Do not describe memos as confidential.
 
 ## 18. Proof of payment, honestly
 
