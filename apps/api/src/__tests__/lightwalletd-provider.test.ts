@@ -180,6 +180,39 @@ describe('LightwalletdProvider', () => {
     expect(obs).toBeNull();
   });
 
+  it('observes a mined mainnet transaction when the endpoint serves mainnet', async () => {
+    const calls: Calls = { closed: false };
+    const provider = providerWith({
+      calls,
+      network: 'mainnet',
+      chainName: 'main',
+      data: bytes,
+      minedHeight: 990,
+      tipHeight: 1000,
+    });
+    const obs = await provider.observe({ claimedTxid: CLAIMED_TXID, network: 'mainnet' });
+    expect(obs).not.toBeNull();
+    expect(obs!.txid).toBe(CLAIMED_TXID);
+    expect(obs!.confirmations).toBe(11); // 1000 - 990 + 1
+    expect(obs!.blockHeight).toBe(990);
+    expect(obs!.broadcast).toBe(true);
+    expect(obs!.source).toBe('lightwalletd');
+    expect(calls.closed).toBe(true);
+  });
+
+  it('refuses a mainnet provider pointed at a testnet endpoint', async () => {
+    const calls: Calls = { closed: false };
+    const provider = providerWith({
+      calls,
+      network: 'mainnet',
+      chainName: 'test',
+      data: bytes,
+      tipHeight: 1000,
+    });
+    const obs = await provider.observe({ claimedTxid: CLAIMED_TXID, network: 'mainnet' });
+    expect(obs).toBeNull();
+  });
+
   it('refuses to observe on a network mismatch before contacting the endpoint', async () => {
     const calls: Calls = { closed: false };
     const provider = providerWith({ calls, data: bytes, network: 'testnet' });

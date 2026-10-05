@@ -17,6 +17,8 @@ type Phase =
   | { name: 'done' }
   | { name: 'paid' };
 
+const NETWORK = (process.env.NEXT_PUBLIC_NETWORK ?? 'testnet') as 'testnet' | 'mainnet';
+
 export default function PayPage({ params }: { params: Promise<{ shortCode: string }> }) {
   const [shortCode, setShortCode] = useState<string | null>(null);
   const [request, setRequest] = useState<PublicPaymentRequest | null>(null);
@@ -160,7 +162,7 @@ export default function PayPage({ params }: { params: Promise<{ shortCode: strin
   if (phase.name === 'loading') {
     return (
       <Shell>
-        <TopBar network="testnet" />
+        <TopBar network={NETWORK} />
         <p className="lede">Loading payment request…</p>
       </Shell>
     );
@@ -169,7 +171,7 @@ export default function PayPage({ params }: { params: Promise<{ shortCode: strin
   if (phase.name === 'error' && !request) {
     return (
       <Shell>
-        <TopBar network="testnet" />
+        <TopBar network={NETWORK} />
         <div className="stack">
           <div className="stack stack--sm">
             <p className="kicker">Payment request</p>
