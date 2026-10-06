@@ -320,4 +320,46 @@ describe('createZecUsdPriceProvider', () => {
     });
     expect(provider.name).toBe('auto');
   });
+
+  it('prefers CoinMarketCap inside the auto chain when a key is configured', async () => {
+    // The first provider in the chain must be CoinMarketCap, so a deployment
+    // that provisions the key actually uses it (not a keyless source).
+    const fetchImpl = vi.fn(async (url: string) => {
+      expect(String(url)).toContain('pro-api.coinmarketcap.com');
+      return jsonResponse({
+        data: { '328': { quote: { USD: { price: 42, last_updated: '2026-01-01T00:00:00.000Z' } } } },
+      });
+    }) as unknown as typeof fetch;
+    const provider = createZecUsdPriceProvider(
+      {
+        BLINK_PRICE_PROVIDER: 'auto',
+        COINMARKETCAP_API_KEY: 'k',
+        BLINK_PRICE_CACHE_TTL_MS: 0,
+        BLINK_PRICE_TIMEOUT_MS: 1000,
+      },
+      { fetchImpl },
+    );
+    const price = await provider.getZecUsdPrice();
+    expect(price.provider).toBe('coinmarketcap');
+    expect(price.price).toBe('42');
+    expect(fetchImpl).toHaveBeenCalledOnce();
+  });
+
+  it('falls through the auto chain to a keyless source when CoinMarketCap fails', async () => {
+    const fetchImpl = vi.fn(async (url: string) => {
+      if (String(url).includes('pro-api.coinmarketcap.com')) return jsonResponse({}, 500);
+      return jsonResponse({ data: { amount: '40', base: 'ZEC', currency: 'USD' } });
+    }) as unknown as typeof fetch;
+    const provider = createZecUsdPriceProvider(
+      {
+        BLINK_PRICE_PROVIDER: 'auto',
+        COINMARKETCAP_API_KEY: 'k',
+        BLINK_PRICE_CACHE_TTL_MS: 0,
+        BLINK_PRICE_TIMEOUT_MS: 1000,
+      },
+      { fetchImpl },
+    );
+    const price = await provider.getZecUsdPrice();
+    expect(price.provider).toBe('coinbase');
+  });
 });

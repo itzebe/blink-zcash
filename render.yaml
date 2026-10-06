@@ -111,11 +111,10 @@ services:
       - key: BLINK_CONFIRMATIONS_REQUIRED
         value: "1"
       # Live ZEC/USD price for USD-denominated requests. ZIP 321 always carries
-      # the converted ZEC amount. `auto` tries keyless sources (Coinbase, then
-      # CoinGecko), so USD requests work with no secret to provision; if
-      # COINMARKETCAP_API_KEY is present, prefer `coinmarketcap` instead. Set to
-      # `none` to disable USD requests (they return 503) while ZEC requests keep
-      # working.
+      # the converted ZEC amount. `auto` uses CoinMarketCap when COINMARKETCAP_API_KEY
+      # is set (the production target), otherwise the keyless chain (Coinbase, then
+      # CoinGecko), so USD requests work with or without the secret. Set to `none`
+      # to disable USD requests (they return 503) while ZEC requests keep working.
       - key: BLINK_PRICE_PROVIDER
         value: auto
       - key: BLINK_PRICE_CACHE_TTL_MS
