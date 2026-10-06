@@ -1,7 +1,8 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import Link from 'next/link';
+import { convertUsdToZec } from '@blink/shared';
 import { Shell, TopBar, Alert } from '@/components/Shell';
 import { BlinkPaymentCard } from '@/components/BlinkPaymentCard';
 import { api, ApiError, type CreatedPaymentRequest } from '@/lib/api';
@@ -15,17 +16,63 @@ const EXPIRY_OPTIONS = [
   { value: 1440, label: '24 hours' },
 ];
 
+type RequestCurrency = 'USD' | 'ZEC';
+
+/** Best-effort client-side preview of the server's USD -> ZEC conversion. */
+function previewZec(usd: string, price: string | null): string | null {
+  if (!price || !usd.trim()) return null;
+  try {
+    return convertUsdToZec(usd.trim(), price).zec;
+  } catch {
+    return null;
+  }
+}
+
 export default function RequestPage() {
   const [recipientName, setRecipientName] = useState('');
   const [recipientAddress, setRecipientAddress] = useState('');
+  const [currency, setCurrency] = useState<RequestCurrency>('ZEC');
   const [amount, setAmount] = useState('');
   const [memo, setMemo] = useState('');
   const [expiryMinutes, setExpiryMinutes] = useState(30);
+
+  const [price, setPrice] = useState<string | null>(null);
+  const [priceError, setPriceError] = useState<string | null>(null);
 
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [created, setCreated] = useState<CreatedPaymentRequest | null>(null);
   const [copied, setCopied] = useState(false);
+
+  // Preview the live rate only when the request is USD-denominated. The server
+  // re-fetches the price at creation; this preview is informational.
+  useEffect(() => {
+    if (currency !== 'USD') {
+      setPrice(null);
+      setPriceError(null);
+      return;
+    }
+    let cancelled = false;
+    setPriceError(null);
+    api
+      .getZecUsdPrice()
+      .then((res) => {
+        if (!cancelled) setPrice(res.price.price);
+      })
+      .catch((err) => {
+        if (!cancelled) {
+          setPrice(null);
+          setPriceError(
+            err instanceof ApiError ? err.message : 'Live ZEC/USD price is unavailable.',
+          );
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [currency]);
+
+  const zecPreview = currency === 'USD' ? previewZec(amount, price) : null;
 
   async function submit(event: React.FormEvent) {
     event.preventDefault();
@@ -36,6 +83,7 @@ export default function RequestPage() {
         recipientName: recipientName.trim(),
         recipientAddress: recipientAddress.trim(),
         amount: amount.trim(),
+        currency,
         ...(memo.trim() ? { memo: memo.trim() } : {}),
         expiryMinutes,
       });
@@ -94,6 +142,7 @@ export default function RequestPage() {
           <BlinkPaymentCard
             amount={created.request.amount}
             currency="ZEC"
+            usdAmount={created.request.usdAmount}
             memo={created.request.memo}
             recipientName={created.request.recipientName}
             network={created.request.network}
@@ -126,6 +175,12 @@ export default function RequestPage() {
               <div>Encoding: ZIP 321 Payment Request URI</div>
               <div>Network: {created.request.network}</div>
               <div>Short Code: {created.shortCode}</div>
+              {created.request.usdAmount ? (
+                <div>
+                  Requested: ${created.request.usdAmount} USD · converted at 1 ZEC = $
+                  {created.request.zecUsdPrice} USD ({created.request.priceProvider})
+                </div>
+              ) : null}
               <div>{created.zip321Uri}</div>
             </div>
           </details>
@@ -151,27 +206,56 @@ export default function RequestPage() {
         {error ? <Alert kind="error">{error}</Alert> : null}
 
         <div className="field">
-          <label className="field__label" htmlFor="amount">
-            Amount
-          </label>
+          <div className="field__label-row">
+            <label className="field__label" htmlFor="amount">
+              Amount
+            </label>
+            <div className="segmented segmented--sm" role="radiogroup" aria-label="Currency">
+              {(['USD', 'ZEC'] as const).map((c) => (
+                <span key={c}>
+                  <input
+                    type="radio"
+                    id={`currency-${c}`}
+                    name="currency"
+                    checked={currency === c}
+                    onChange={() => setCurrency(c)}
+                  />
+                  <label htmlFor={`currency-${c}`}>{c}</label>
+                </span>
+              ))}
+            </div>
+          </div>
           <div className="amount-input">
             <span className="prefix" aria-hidden="true">
-              $
+              {currency === 'USD' ? '$' : 'ⓩ'}
             </span>
             <input
               id="amount"
               className="input"
               inputMode="decimal"
               autoComplete="off"
-              placeholder="25.00"
+              placeholder={currency === 'USD' ? '25.00' : '0.625'}
               value={amount}
               onChange={(e) => setAmount(e.target.value)}
               required
             />
             <span className="suffix" aria-hidden="true">
-              ZEC
+              {currency}
             </span>
           </div>
+          {currency === 'USD' ? (
+            <p className="tiny muted" aria-live="polite">
+              {priceError
+                ? priceError
+                : price && zecPreview
+                  ? `1 ZEC = $${price} USD · you'll request ≈ ${zecPreview} ZEC`
+                  : price
+                    ? `1 ZEC = $${price} USD`
+                    : 'Fetching live ZEC/USD price…'}
+            </p>
+          ) : (
+            <p className="tiny muted">Amount is denominated in ZEC.</p>
+          )}
         </div>
 
         <div className="field">

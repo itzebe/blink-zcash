@@ -110,6 +110,18 @@ services:
         value: https://testnet.zec.rocks:443
       - key: BLINK_CONFIRMATIONS_REQUIRED
         value: "1"
+      # Live ZEC/USD price for USD-denominated requests. ZIP 321 always carries
+      # the converted ZEC amount; the key stays server-side (never NEXT_PUBLIC_).
+      # Default `none` keeps deploys bootable: USD requests return 503 and ZEC
+      # requests still work. To enable USD requests, set this to
+      # `coinmarketcap` AND set COINMARKETCAP_API_KEY in the Render Dashboard
+      # (the API refuses to start with one but not the other).
+      - key: BLINK_PRICE_PROVIDER
+        value: none
+      - key: BLINK_PRICE_CACHE_TTL_MS
+        value: "60000"
+      - key: BLINK_PRICE_TIMEOUT_MS
+        value: "5000"
       # --- secrets / per-deployment values: set in the Render Dashboard -------
       # Neon connection string, e.g.
       #   postgresql://USER:PASSWORD@HOST/DB?sslmode=require
@@ -118,6 +130,10 @@ services:
       # 32-byte hex key (64 chars) used to encrypt recipient addresses at rest.
       # Generate: node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
       - key: BLINK_ENCRYPTION_KEY
+        sync: false
+      # CoinMarketCap API key for the live ZEC/USD price. Server-side secret:
+      # set it in the Render Dashboard, never in source control.
+      - key: COINMARKETCAP_API_KEY
         sync: false
       # Public base URL of the web app (used to build share links). Paste the
       # blink-web URL after the first deploy, e.g. https://blink-web.onrender.com

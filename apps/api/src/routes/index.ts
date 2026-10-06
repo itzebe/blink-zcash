@@ -15,10 +15,13 @@ import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { ALLOWED_EXPIRY_MINUTES } from '@blink/shared';
 import { PaymentRequestError } from '../services/payment-service.js';
+import type { ZecUsdPriceProvider } from '../services/price-service.js';
 
 export interface RouteDeps {
   service: import('../services/payment-service.js').PaymentService;
   config: import('../config.js').AppConfig;
+  /** Live ZEC/USD price source, when configured. Never exposes the API key. */
+  priceProvider?: ZecUsdPriceProvider;
   /** Resolve the caller's user id, if authenticated. */
   resolveOwner?: (req: unknown) => Promise<string | null>;
 }
@@ -27,7 +30,11 @@ const createSchema = z.object({
   recipientName: z.string().min(1).max(64),
   recipientAddress: z.string().min(1).max(400),
   amount: z.string().min(1).max(40),
-  currency: z.literal('ZEC').default('ZEC'),
+  /**
+   * Request denomination. `USD` makes the server fetch a live ZEC/USD price and
+   * convert; the resulting request is always settled in ZEC.
+   */
+  currency: z.enum(['ZEC', 'USD']).default('ZEC'),
   memo: z.string().max(1000).nullish(),
   label: z.string().max(100).nullish(),
   message: z.string().max(500).nullish(),
@@ -52,7 +59,31 @@ export async function registerRoutes(app: FastifyInstance, deps: RouteDeps): Pro
     network: config.ZCASH_NETWORK,
     zcashEngineConfigured: Boolean(config.BLINK_ZCASH_SERVICE_URL),
     verificationProvider: config.BLINK_VERIFICATION_PROVIDER,
+    priceProvider: config.BLINK_PRICE_PROVIDER,
   }));
+
+  /**
+   * Current ZEC/USD price, used by the Request screen to preview the conversion.
+   * Read-only and secret-free: it returns only the normalized price, never the
+   * provider key or the raw provider payload.
+   */
+  app.get('/v1/price/zec-usd', async (_req, reply) => {
+    if (!deps.priceProvider || config.BLINK_PRICE_PROVIDER === 'none') {
+      return reply.code(503).send({
+        error: 'price_not_configured',
+        message: 'no live ZEC/USD price provider is configured',
+      });
+    }
+    try {
+      const price = await deps.priceProvider.getZecUsdPrice();
+      return reply.send({ price });
+    } catch (err) {
+      return reply.code(503).send({
+        error: 'price_unavailable',
+        message: (err as Error).message,
+      });
+    }
+  });
 
   /** Create a payment request. */
   app.post('/v1/payment-requests', async (req, reply) => {
@@ -232,7 +263,10 @@ export async function registerRoutes(app: FastifyInstance, deps: RouteDeps): Pro
       receipt: {
         shortCode: fresh.shortCode,
         amount: fresh.amount,
-        currency: fresh.currency,
+        // The receipt settles in ZEC; the original USD request is shown alongside.
+        currency: 'ZEC',
+        usdAmount: fresh.usdAmount,
+        zecUsdPrice: fresh.zecUsdPrice,
         memo: fresh.memo,
         network: fresh.network,
         status: fresh.status,

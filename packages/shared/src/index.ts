@@ -15,8 +15,33 @@ export type ZcashNetwork = 'testnet' | 'mainnet';
  */
 export type AddressKind = 'transparent' | 'sapling' | 'unified';
 
-/** Currencies a BLINK payment request can be denominated in. */
-export type Currency = 'ZEC';
+/**
+ * Currencies a BLINK payment request can be denominated in.
+ *
+ * `USD` is a *request* denomination only: the user asks for a USD value and the
+ * API converts it to ZEC at a live rate before anything is encoded. `ZEC` is the
+ * settlement denomination and the only value ZIP 321 ever carries.
+ */
+export type Currency = 'ZEC' | 'USD';
+
+/**
+ * A normalized ZEC/USD price observation from a price provider.
+ *
+ * Deliberately small: the raw provider payload is never propagated to clients.
+ * `price` is the price of one ZEC in USD, as a canonical decimal string.
+ */
+export interface ZecUsdPrice {
+  /** Provider identifier, e.g. "coinmarketcap". */
+  provider: string;
+  /** Base asset, always "ZEC". */
+  asset: 'ZEC';
+  /** Quote currency, always "USD". */
+  quote: 'USD';
+  /** Price of 1 ZEC in USD, e.g. "40" or "40.25". */
+  price: string;
+  /** Provider timestamp (ISO 8601) when supplied, otherwise null. */
+  observedAt: string | null;
+}
 
 /**
  * Lifecycle of a payment request. These states are intentionally granular: we
@@ -201,8 +226,21 @@ export interface PaymentRequest {
 export interface PublicPaymentRequest {
   shortCode: string;
   recipientName: string;
+  /**
+   * Settlement amount in ZEC. This is the value encoded in the ZIP 321 URI and
+   * the only amount the blockchain sees.
+   */
   amount: string;
+  /** Settlement currency. Always "ZEC" — ZIP 321 amounts are ZEC-denominated. */
   currency: Currency;
+  /** Original requested amount in USD, or null for a native ZEC request. */
+  usdAmount: string | null;
+  /** ZEC/USD price used to convert `usdAmount`, or null for a native ZEC request. */
+  zecUsdPrice: string | null;
+  /** Price provider id (e.g. "coinmarketcap"), or null for a native ZEC request. */
+  priceProvider: string | null;
+  /** Provider price timestamp (ISO 8601), or null when unavailable. */
+  priceObservedAt: string | null;
   memo: string | null;
   network: ZcashNetwork;
   status: PaymentStatus;
