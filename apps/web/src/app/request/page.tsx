@@ -2,9 +2,11 @@
 
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
-import { convertUsdToZec, settledZecAmount } from '@blink/shared';
+import { convertUsdToZec, settledZecAmount, privacyCapability, type PrivacyCapability } from '@blink/shared';
+import { parseAddress } from '@blink/zcash';
 import { Shell, TopBar, Alert } from '@/components/Shell';
 import { BlinkPaymentCard } from '@/components/BlinkPaymentCard';
+import { PrivacyPanel } from '@/components/PrivacyPanel';
 import { api, ApiError, type CreatedPaymentRequest } from '@/lib/api';
 
 const NETWORK = (process.env.NEXT_PUBLIC_NETWORK ?? 'testnet') as 'testnet' | 'mainnet';
@@ -18,11 +20,83 @@ const EXPIRY_OPTIONS = [
 
 type RequestCurrency = 'USD' | 'ZEC';
 
+/**
+ * Lightweight use-case presets over the ONE request flow. Each mode only
+ * pre-fills the same payment request; there is no separate mini-app and no
+ * fabricated transaction. `subscription` is deliberately a payment-request
+ * workflow, not autonomous recurring charging: BLINK cannot and does not move
+ * funds on the payer's behalf.
+ */
+interface UseCaseMode {
+  id: string;
+  label: string;
+  amount: string;
+  currency: RequestCurrency;
+  memo: string;
+  expiryMinutes: number;
+  hint: string;
+}
+
+const MODES: UseCaseMode[] = [
+  {
+    id: 'pos',
+    label: 'Point of sale',
+    amount: '5',
+    currency: 'USD',
+    memo: 'Point of sale',
+    expiryMinutes: 10,
+    hint: 'A quick in-person charge with a short expiry.',
+  },
+  {
+    id: 'payroll',
+    label: 'Payroll',
+    amount: '850',
+    currency: 'USD',
+    memo: 'Salary',
+    expiryMinutes: 1440,
+    hint: 'A salary payment request you can send to each team member.',
+  },
+  {
+    id: 'remittance',
+    label: 'Remittance',
+    amount: '200',
+    currency: 'USD',
+    memo: 'Remittance',
+    expiryMinutes: 1440,
+    hint: 'A cross-border transfer request. The recipient address never appears in the link.',
+  },
+  {
+    id: 'subscription',
+    label: 'Subscription',
+    amount: '15',
+    currency: 'USD',
+    memo: 'Monthly subscription',
+    expiryMinutes: 1440,
+    hint: 'A recurring request. BLINK issues a fresh, dated request each period; it never charges automatically and holds no funds.',
+  },
+];
+
 /** Best-effort client-side preview of the server's USD -> ZEC conversion. */
 function previewZec(usd: string, price: string | null): string | null {
   if (!price || !usd.trim()) return null;
   try {
     return settledZecAmount(convertUsdToZec(usd.trim(), price));
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Best-effort client-side privacy preview from the typed address. The server
+ * recomputes and stores the authoritative capability at creation; this is only
+ * so the recipient sees the privacy of the route before they submit.
+ */
+function previewPrivacy(address: string, network: 'testnet' | 'mainnet'): PrivacyCapability | null {
+  if (!address.trim()) return null;
+  try {
+    const parsed = parseAddress(address.trim());
+    if (parsed.network !== network) return null;
+    return privacyCapability(parsed.kind);
   } catch {
     return null;
   }
@@ -35,6 +109,7 @@ export default function RequestPage() {
   const [amount, setAmount] = useState('');
   const [memo, setMemo] = useState('');
   const [expiryMinutes, setExpiryMinutes] = useState(30);
+  const [mode, setMode] = useState<string | null>(null);
 
   const [price, setPrice] = useState<string | null>(null);
   const [priceError, setPriceError] = useState<string | null>(null);
@@ -43,6 +118,16 @@ export default function RequestPage() {
   const [error, setError] = useState<string | null>(null);
   const [created, setCreated] = useState<CreatedPaymentRequest | null>(null);
   const [copied, setCopied] = useState(false);
+
+  const privacyPreview = previewPrivacy(recipientAddress, NETWORK);
+
+  function applyMode(next: UseCaseMode) {
+    setMode(next.id);
+    setAmount(next.amount);
+    setCurrency(next.currency);
+    setMemo(next.memo);
+    setExpiryMinutes(next.expiryMinutes);
+  }
 
   // Preview the live rate only when the request is USD-denominated. The server
   // re-fetches the price at creation; this preview is informational.
@@ -169,6 +254,9 @@ export default function RequestPage() {
             </div>
           </BlinkPaymentCard>
 
+          {/* Privacy of the created route, exactly as the server stored it. */}
+          <PrivacyPanel privacy={created.request.privacy} />
+
           <details className="tech">
             <summary>View technical details</summary>
             <div className="tech__body">
@@ -201,6 +289,27 @@ export default function RequestPage() {
         <div className="stack stack--sm">
           <p className="kicker">Request payment</p>
           <h1>Get paid with a link.</h1>
+        </div>
+
+        {/* Use-case presets. Each only pre-fills the same request flow. */}
+        <div className="field">
+          <span className="field__label">Mode</span>
+          <div className="mode-chips" role="group" aria-label="Use case">
+            {MODES.map((m) => (
+              <button
+                key={m.id}
+                type="button"
+                className="mode-chip"
+                aria-pressed={mode === m.id}
+                onClick={() => applyMode(m)}
+              >
+                {m.label}
+              </button>
+            ))}
+          </div>
+          {mode ? (
+            <p className="mode-chip__hint">{MODES.find((m) => m.id === mode)?.hint}</p>
+          ) : null}
         </div>
 
         {error ? <Alert kind="error">{error}</Alert> : null}
@@ -313,7 +422,7 @@ export default function RequestPage() {
           <input
             id="address"
             className="input input--mono"
-            placeholder="u1… or ztestsapling…"
+            placeholder={NETWORK === 'mainnet' ? 'u1… or zs1… or t1…' : 'utest… or ztestsapling…'}
             autoComplete="off"
             spellCheck={false}
             value={recipientAddress}
@@ -323,6 +432,8 @@ export default function RequestPage() {
           <p className="tiny muted">
             Stays on the server behind this link. It never appears in the shareable URL.
           </p>
+          {/* Privacy of the route, computed from the address kind. */}
+          {privacyPreview ? <PrivacyPanel privacy={privacyPreview} compact /> : null}
         </div>
 
         <button className="btn btn--primary" type="submit" disabled={busy}>

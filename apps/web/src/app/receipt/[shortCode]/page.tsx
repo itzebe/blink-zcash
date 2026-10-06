@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { Shell, TopBar, Alert, Row } from '@/components/Shell';
+import { PrivacyPanel } from '@/components/PrivacyPanel';
 import { api, ApiError, type Receipt } from '@/lib/api';
 
 export default function ReceiptPage({ params }: { params: Promise<{ shortCode: string }> }) {
@@ -66,6 +67,8 @@ export default function ReceiptPage({ params }: { params: Promise<{ shortCode: s
                 <Row label="Observed">{new Date(receipt.paidAt).toLocaleString()}</Row>
               </div>
             </div>
+
+            {receipt.privacy ? <PrivacyPanel privacy={receipt.privacy} /> : null}
 
             <Alert kind="info">{receipt.statement}</Alert>
 

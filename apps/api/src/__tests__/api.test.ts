@@ -633,6 +633,13 @@ describe('mainnet network isolation', () => {
     expect(verify.json().verification.observed).toBe(false);
     expect(verify.json().request.status).not.toBe('CONFIRMED');
   });
+
+  it('reports transparent privacy for a mainnet transparent recipient', async () => {
+    const { body } = await createMain();
+    expect(body.request.privacy.recipientKind).toBe('transparent');
+    expect(body.request.privacy.recipient).toBe('public');
+    expect(body.request.privacy.amount).toBe('public');
+  });
 });
 
 describe('GET /health', () => {
@@ -641,5 +648,107 @@ describe('GET /health', () => {
     expect(res.statusCode).toBe(200);
     expect(res.json().network).toBe('testnet');
     expect(res.json().verificationProvider).toBe('none');
+  });
+});
+
+describe('GET /v1/meta/network', () => {
+  it('exposes the authoritative network for the fail-closed web guard', async () => {
+    const res = await built.app.inject({ url: '/v1/meta/network' });
+    expect(res.statusCode).toBe(200);
+    const body = res.json();
+    expect(body.network).toBe('testnet');
+    expect(typeof body.verificationProvider).toBe('string');
+    expect(typeof body.priceProvider).toBe('string');
+  });
+
+  it('reports mainnet when the API is configured for mainnet', async () => {
+    const config = loadConfig({
+      ...baseEnv,
+      ZCASH_NETWORK: 'mainnet',
+      NEXT_PUBLIC_NETWORK: 'mainnet',
+    });
+    const main = await buildApp({ config, provider: new StubProvider() });
+    await main.app.ready();
+    try {
+      const res = await main.app.inject({ url: '/v1/meta/network' });
+      expect(res.json().network).toBe('mainnet');
+    } finally {
+      await main.app.close();
+    }
+  });
+});
+
+describe('privacy capability', () => {
+  it('marks a Sapling recipient as shielded and never claims the sender is hidden', async () => {
+    const { body } = await create({ recipientAddress: TEST_SAPLING });
+    const privacy = body.request.privacy;
+    expect(privacy.recipientKind).toBe('sapling');
+    expect(privacy.recipient).toBe('protected');
+    expect(privacy.amount).toBe('protected');
+    // A transparent payer stays public; BLINK must not claim otherwise.
+    expect(privacy.sender).toBe('varies');
+    expect(privacy.level).toBe('shielded');
+    expect(JSON.stringify(privacy).toLowerCase()).not.toContain('anonymous');
+  });
+
+  it('marks a Unified Address recipient as shielded', async () => {
+    const { status, body } = await create({ recipientAddress: TEST_UA, memo: 'x' });
+    expect(status).toBe(201);
+    expect(body.request.privacy.recipientKind).toBe('unified');
+    expect(body.request.privacy.recipient).toBe('protected');
+    expect(body.request.privacy.supportsMemo).toBe(true);
+  });
+
+  it('marks a transparent recipient as fully public', async () => {
+    const config = loadConfig({
+      ...baseEnv,
+      ZCASH_NETWORK: 'mainnet',
+      NEXT_PUBLIC_NETWORK: 'mainnet',
+    });
+    const main = await buildApp({ config, provider: new StubProvider() });
+    await main.app.ready();
+    try {
+      const res = await main.app.inject({
+        method: 'POST',
+        url: '/v1/payment-requests',
+        payload: {
+          recipientName: 'Merchant',
+          recipientAddress: MAIN_TRANSPARENT,
+          amount: '1',
+          expiryMinutes: 30,
+        },
+      });
+      const privacy = res.json().request.privacy;
+      expect(privacy.recipientKind).toBe('transparent');
+      expect(privacy.recipient).toBe('public');
+      expect(privacy.amount).toBe('public');
+      expect(privacy.level).toBe('transparent');
+      expect(privacy.supportsMemo).toBe(false);
+    } finally {
+      await main.app.close();
+    }
+  });
+
+  it('exposes the same privacy capability on the public view and the payment details', async () => {
+    const { body } = await create({ recipientAddress: TEST_SAPLING });
+    const view = (
+      await built.app.inject({ url: `/v1/payment-requests/${body.shortCode}` })
+    ).json();
+    expect(view.request.privacy.recipientKind).toBe('sapling');
+
+    const details = (
+      await built.app.inject({ url: `/v1/payment-requests/${body.shortCode}/payment-details` })
+    ).json();
+    expect(details.privacy.recipientKind).toBe('sapling');
+    expect(details.privacy.amount).toBe('protected');
+  });
+
+  it('persists the privacy snapshot on the stored row', async () => {
+    const { body } = await create({ recipientAddress: TEST_SAPLING });
+    const [row] = await built.db
+      .select({ privacy: paymentRequests.privacy })
+      .from(paymentRequests)
+      .where(sql`${paymentRequests.shortCode} = ${body.shortCode}`);
+    expect(row?.privacy).toMatchObject({ recipientKind: 'sapling', level: 'shielded' });
   });
 });

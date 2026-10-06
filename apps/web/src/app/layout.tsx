@@ -1,5 +1,6 @@
 import type { Metadata, Viewport } from 'next';
 import './globals.css';
+import { NetworkGuard } from '@/components/NetworkGuard';
 
 export const metadata: Metadata = {
   title: 'BLINK — Send money, not your wallet address',
@@ -18,7 +19,9 @@ export const viewport: Viewport = {
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="en">
-      <body>{children}</body>
+      <body>
+        <NetworkGuard>{children}</NetworkGuard>
+      </body>
     </html>
   );
 }

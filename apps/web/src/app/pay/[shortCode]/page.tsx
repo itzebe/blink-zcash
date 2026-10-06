@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { Shell, TopBar, Alert, Row, StatusBadge } from '@/components/Shell';
 import { BlinkPaymentCard } from '@/components/BlinkPaymentCard';
+import { PrivacyPanel } from '@/components/PrivacyPanel';
 import { api, ApiError, type PaymentDetails, type PublicPaymentRequest } from '@/lib/api';
 import { statusLabel, statusTone, statusIsVerified } from '@/lib/status';
 
@@ -218,6 +219,7 @@ export default function PayPage({ params }: { params: Promise<{ shortCode: strin
             <Row label="Confirmations">{request.confirmations}</Row>
             {request.txidShort ? <Row label="Transaction">{request.txidShort}</Row> : null}
           </div>
+          <PrivacyPanel privacy={request.privacy} />
           <Link className="btn btn--ghost" href={`/receipt/${request.shortCode}`}>
             View receipt
           </Link>
@@ -353,8 +355,9 @@ export default function PayPage({ params }: { params: Promise<{ shortCode: strin
             <Row label="Recipient">{request.recipientName}</Row>
             {request.memo ? <Row label="Memo">{request.memo}</Row> : null}
             <Row label="Network">{network === 'mainnet' ? 'Zcash Mainnet' : 'Zcash Testnet'}</Row>
-            <Row label="Payment type">Shielded where the recipient supports it</Row>
           </div>
+          {/* What the protocol actually protects for this route. */}
+          <PrivacyPanel privacy={request.privacy} />
           <button className="btn btn--primary" onClick={payWithWallet}>
             Confirm payment
           </button>
@@ -409,6 +412,9 @@ export default function PayPage({ params }: { params: Promise<{ shortCode: strin
           {notice ? <Alert kind="warn">{notice}</Alert> : null}
         </BlinkPaymentCard>
 
+        {/* Accurate privacy disclosure: what this route does and does not protect. */}
+        <PrivacyPanel privacy={request.privacy} />
+
         {details ? (
           <details className="tech">
             <summary>View details</summary>
@@ -425,7 +431,7 @@ export default function PayPage({ params }: { params: Promise<{ shortCode: strin
         ) : null}
 
         <p className="tiny muted center">
-          PRIVATE PAYMENT · Protected by Zcash shielded protocol
+          Non-custodial · BLINK never holds your funds or spending keys
         </p>
       </div>
     </Shell>

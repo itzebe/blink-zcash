@@ -36,6 +36,7 @@ CREATE TABLE IF NOT EXISTS payment_requests (
   label text,
   message text,
   network text NOT NULL,
+  privacy jsonb,
   zip321_uri text NOT NULL,
   status text NOT NULL DEFAULT 'CREATED',
   claimed_txid text,
@@ -57,6 +58,7 @@ ALTER TABLE payment_requests ADD COLUMN IF NOT EXISTS usd_amount text;
 ALTER TABLE payment_requests ADD COLUMN IF NOT EXISTS zec_usd_price text;
 ALTER TABLE payment_requests ADD COLUMN IF NOT EXISTS price_provider text;
 ALTER TABLE payment_requests ADD COLUMN IF NOT EXISTS price_observed_at timestamptz;
+ALTER TABLE payment_requests ADD COLUMN IF NOT EXISTS privacy jsonb;
 
 CREATE TABLE IF NOT EXISTS payment_events (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),

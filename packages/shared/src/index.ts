@@ -6,6 +6,8 @@
  * pulling in any runtime concerns.
  */
 
+import type { PrivacyCapability } from './privacy.js';
+
 /** Zcash networks supported by BLINK. */
 export type ZcashNetwork = 'testnet' | 'mainnet';
 
@@ -246,6 +248,12 @@ export interface PublicPaymentRequest {
   status: PaymentStatus;
   confirmations: number;
   txidShort: string | null;
+  /**
+   * Protocol-accurate privacy capability of this request's route, derived from
+   * the recipient address kind. Present so no client has to guess, and so the
+   * UI can never claim more privacy than the transaction delivers.
+   */
+  privacy: PrivacyCapability;
   expiresAt: string;
   createdAt: string;
 }
@@ -258,3 +266,4 @@ export type ExpiryMinutes = (typeof ALLOWED_EXPIRY_MINUTES)[number];
 export const MAX_MEMO_BYTES = 512;
 
 export * from './money.js';
+export * from './privacy.js';

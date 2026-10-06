@@ -875,3 +875,117 @@ details.tech .tech__body div + div {
   letter-spacing: 0.06em;
   text-align: center;
 }
+
+/* ------------------------------------------------------------------ */
+/* Privacy capability panel                                            */
+/* ------------------------------------------------------------------ */
+.privacy {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 14px 16px;
+  background: var(--surface-2);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.privacy--shielded {
+  border-color: rgba(74, 222, 128, 0.32);
+  background: linear-gradient(180deg, rgba(74, 222, 128, 0.06), transparent);
+}
+.privacy--transparent {
+  border-color: rgba(255, 92, 92, 0.32);
+  background: linear-gradient(180deg, rgba(255, 92, 92, 0.06), transparent);
+}
+.privacy__head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.privacy__kicker {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--muted-2);
+}
+.privacy__route {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+  text-align: right;
+}
+.privacy__facts {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.privacy__fact {
+  flex: 1 1 0;
+  min-width: 90px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 8px 10px;
+  border-radius: var(--radius-sm);
+  background: var(--surface-solid);
+  border: 1px solid var(--border);
+}
+.privacy__fact-label {
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--muted-2);
+}
+.privacy__fact-value {
+  font-size: 13px;
+  font-weight: 600;
+}
+.privacy__fact--protected .privacy__fact-value {
+  color: var(--success);
+}
+.privacy__fact--public .privacy__fact-value {
+  color: var(--danger);
+}
+.privacy__fact--varies .privacy__fact-value {
+  color: var(--muted);
+}
+.privacy__note {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--muted);
+}
+
+/* Use-case mode chips on the Request screen */
+.mode-chips {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.mode-chip {
+  border: 1px solid var(--border-light);
+  background: var(--surface-2);
+  color: var(--muted);
+  border-radius: 999px;
+  padding: 6px 14px;
+  font-size: 12px;
+  cursor: pointer;
+  transition: border-color 0.15s ease, color 0.15s ease, background 0.15s ease;
+}
+.mode-chip:hover {
+  color: var(--text);
+  border-color: var(--accent);
+}
+.mode-chip[aria-pressed='true'] {
+  background: var(--accent-bg);
+  border-color: var(--accent);
+  color: var(--accent-strong);
+}
+.mode-chip__hint {
+  font-size: 12px;
+  color: var(--muted);
+  margin: 0;
+}
+

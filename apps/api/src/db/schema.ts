@@ -71,6 +71,13 @@ export const paymentRequests = pgTable(
     label: text('label'),
     message: text('message'),
     network: text('network').notNull(),
+    /**
+     * Privacy capability snapshot derived from the recipient address kind at
+     * creation. Stored (rather than recomputed on read) so a receipt always
+     * reports exactly what was shown when the request was made, and so the
+     * wording can never drift to over-claim privacy.
+     */
+    privacy: jsonb('privacy'),
     /** The ZIP 321 URI. Contains the address, so access is controlled. */
     zip321Uri: text('zip321_uri').notNull(),
     status: text('status').notNull().default('CREATED'),

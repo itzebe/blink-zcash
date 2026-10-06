@@ -24,7 +24,8 @@ export default function HomePage() {
             <span style={{ color: 'var(--accent)' }}>Not your wallet address.</span>
           </h1>
           <p className="lede" style={{ maxWidth: 440, margin: '0 auto' }}>
-            BLINK turns any Zcash payment into a private digital link. Non-custodial, instant, shielded.
+            BLINK turns any Zcash payment into a private digital link. Non-custodial, ZIP 321
+            compliant, and honest about privacy: shielded when your address is shielded.
           </p>
         </div>
 
@@ -108,7 +109,8 @@ export default function HomePage() {
               <div>
                 <span className="action__title">Pay Privately</span>
                 <span className="action__desc" style={{ display: 'block' }}>
-                  The payer opens their Zcash wallet and approves the transaction via shielded payment.
+                  The payer opens their Zcash wallet and approves the payment. Shielded addresses
+                  keep the recipient and amount private.
                 </span>
               </div>
             </div>
@@ -122,19 +124,33 @@ export default function HomePage() {
             <div className="row" style={{ paddingTop: 0 }}>
               <div>
                 <strong style={{ display: 'block', fontSize: 15 }}>Point of Sale</strong>
-                <span className="tiny muted">Merchant creates a request → customer scans QR → instant payment</span>
+                <span className="tiny muted">
+                  Merchant creates a short-expiry request → customer scans the QR → instant payment
+                </span>
               </div>
             </div>
             <div className="row">
               <div>
-                <strong style={{ display: 'block', fontSize: 15 }}>Remittance & Sharing</strong>
-                <span className="tiny muted">Send a payment link in messaging apps without revealing wallet addresses</span>
+                <strong style={{ display: 'block', fontSize: 15 }}>Remittance &amp; Sharing</strong>
+                <span className="tiny muted">
+                  Send a payment link in messaging apps without revealing wallet addresses
+                </span>
               </div>
             </div>
             <div className="row">
               <div>
-                <strong style={{ display: 'block', fontSize: 15 }}>Private Payroll & Invoicing</strong>
-                <span className="tiny muted">Request exact amounts with a memo attached to the payment request</span>
+                <strong style={{ display: 'block', fontSize: 15 }}>Private Payroll &amp; Invoicing</strong>
+                <span className="tiny muted">
+                  Request exact amounts with a memo attached to the payment request
+                </span>
+              </div>
+            </div>
+            <div className="row">
+              <div>
+                <strong style={{ display: 'block', fontSize: 15 }}>Subscriptions</strong>
+                <span className="tiny muted">
+                  Issue a fresh recurring request each period — never an automatic charge
+                </span>
               </div>
             </div>
           </div>
@@ -145,7 +161,9 @@ export default function HomePage() {
           <p className="kicker" style={{ color: 'var(--accent)' }}>Built on Zcash Protocol</p>
           <h2 style={{ fontSize: 18 }}>Shielded Payment Infrastructure</h2>
           <p className="tiny muted" style={{ maxWidth: 420, margin: '0 auto' }}>
-            Zcash provides zero-knowledge cryptography that protects financial privacy. BLINK adds a clean payment request layer using ZIP 321 standards.
+            Zcash provides zero-knowledge cryptography that protects financial privacy. BLINK adds a
+            clean payment request layer using the ZIP 321 standard, and states the actual privacy of
+            each route rather than over-promising.
           </p>
         </div>
 

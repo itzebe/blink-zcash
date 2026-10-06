@@ -7,6 +7,8 @@
  * reports what a verification provider actually observed.
  */
 
+import type { PrivacyCapability } from '@blink/shared';
+
 export interface PublicPaymentRequest {
   shortCode: string;
   recipientName: string;
@@ -25,6 +27,8 @@ export interface PublicPaymentRequest {
   status: string;
   confirmations: number;
   txidShort: string | null;
+  /** Protocol-accurate privacy capability of the route (from the address kind). */
+  privacy: PrivacyCapability;
   expiresAt: string;
   createdAt: string;
 }
@@ -52,6 +56,7 @@ export interface PaymentDetails {
   addressKind: string | null;
   addressFingerprint: string | null;
   network: 'testnet' | 'mainnet';
+  privacy: PrivacyCapability;
   status: string;
   expiresAt: string;
 }
@@ -125,6 +130,11 @@ export const api = {
     return request<{ price: ZecUsdPrice }>('/v1/price/zec-usd');
   },
 
+  /** Authoritative network identity, used by the fail-closed network guard. */
+  getNetwork(): Promise<{ network: 'testnet' | 'mainnet'; verificationProvider: string; priceProvider: string }> {
+    return request('/v1/meta/network');
+  },
+
   getPaymentRequest(shortCode: string): Promise<{ request: PublicPaymentRequest }> {
     return request(`/v1/payment-requests/${encodeURIComponent(shortCode)}`);
   },
@@ -182,6 +192,7 @@ export interface Receipt {
   zecUsdPrice: string | null;
   memo: string | null;
   network: string;
+  privacy: PrivacyCapability;
   status: string;
   txid: string | null;
   confirmations: number;
