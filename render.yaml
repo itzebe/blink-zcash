@@ -113,8 +113,9 @@ services:
         value: "1"
       # Live ZEC/USD price for USD-denominated requests. ZIP 321 always carries
       # the converted ZEC amount. Production mainnet uses the authoritative
-      # CoinMarketCap provider; the API refuses to boot on mainnet with a keyless
-      # provider, so USD requests can never be priced from an unconfigured source.
+      # CoinMarketCap provider; a keyless provider is refused on mainnet, so USD
+      # requests can never be priced from an unconfigured source. If the key is
+      # missing the API degrades to `none` (USD 503) instead of crashing.
       # Requires COINMARKETCAP_API_KEY (set in the Render Dashboard, below).
       - key: BLINK_PRICE_PROVIDER
         value: coinmarketcap

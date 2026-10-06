@@ -153,8 +153,10 @@ to ZEC server-side at a live rate and the URI/QR always encode the ZEC amount.
   CoinMarketCap is tried first, with the keyless sources behind it. `none`
   refuses USD requests
   while ZEC requests keep working. Production mainnet requires
-  `BLINK_PRICE_PROVIDER=coinmarketcap` with a key; the API refuses to boot
-  otherwise, so a mainnet USD request can never be priced from a keyless source.
+  `BLINK_PRICE_PROVIDER=coinmarketcap` with a key; a keyless provider is
+  refused, and a missing key degrades to `none` (USD returns 503) rather than
+  crashing the API, so a mainnet USD request is never priced from a keyless
+  source.
 - The original request is snapshotted: `usd_amount`, `zec_usd_price` and
   `price_provider` are stored alongside the ZEC `amount`, so a later market move
   cannot change an already-created request. The payer sees both figures.

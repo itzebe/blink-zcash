@@ -106,7 +106,9 @@ Rust checks used in CI: `cargo fmt --all -- --check`,
   let a failed conversion fall through as a ZEC amount. On mainnet in production
   the provider MUST be `coinmarketcap` (with a key) or `none`; the API refuses to
   boot with a keyless provider so a mainnet USD request is never priced from an
-  unconfigured source.
+  unconfigured source. A missing `COINMARKETCAP_API_KEY` in production degrades
+  to `none` (USD requests 503) rather than crashing the API, so ZEC keeps
+  working; adding the key re-enables USD with no code redeploy.
 - **CoinMarketCap integration is shape-sensitive.** The live v3 Quotes Latest
   endpoint returns `data` as an ARRAY and `quote` as an ARRAY of per-currency
   quotes; the code also accepts the legacy id-keyed object shape. The provider
