@@ -86,6 +86,20 @@ Rust checks used in CI: `cargo fmt --all -- --check`,
   rewrites it to `API_BASE_URL` (server-side). Do NOT set `NEXT_PUBLIC_API_BASE_URL`
   on Render: it inlines a cross-origin URL at build time and reintroduces CORS
   failures. The API's `BLINK_ALLOWED_ORIGINS` is only a fallback.
+- **Live production (Render).** `blink-web` / `blink-api` / `blink-engine` are the
+  services that deploy from `main`. The API reports its effective providers at
+  `/health` and its authoritative network at `/v1/meta/network`; the web app's
+  `NetworkGuard` blocks the whole UI when `NEXT_PUBLIC_NETWORK` disagrees with
+  that. As of this session production was `network=mainnet`,
+  `verificationProvider=lightwalletd`, but **`priceProvider=none`**: the Render
+  Dashboard `COINMARKETCAP_API_KEY` is unset, so USD requests return 503 while ZEC
+  works. Set the key in the Dashboard and the API flips to `coinmarketcap` with no
+  redeploy. There is no Render API token in this environment, so that env var can
+  only be set through the Dashboard.
+- **Engine cold starts on the free plan.** `blink-engine` (free) spins down when
+  idle; the first request can 502 while it wakes, which surfaces as
+  `invalid_address … non-JSON response (HTTP 502)` on request creation. Retry once
+  warm; this is not a code bug.
 - **Memos are plaintext** (stored, shown, and encoded in the ZIP 321 URI). Only
   the recipient address is encrypted at rest. Never claim memos are encrypted.
 - **Local `npm ci` needs `NODE_ENV=development`** (or `--include=dev`); the shell
