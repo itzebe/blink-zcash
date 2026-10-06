@@ -28,6 +28,10 @@ CREATE TABLE IF NOT EXISTS payment_requests (
   recipient_address_fingerprint text,
   amount text NOT NULL,
   currency text NOT NULL DEFAULT 'ZEC',
+  usd_amount text,
+  zec_usd_price text,
+  price_provider text,
+  price_observed_at timestamptz,
   memo text,
   label text,
   message text,
@@ -46,6 +50,13 @@ CREATE TABLE IF NOT EXISTS payment_requests (
 CREATE UNIQUE INDEX IF NOT EXISTS payment_requests_short_code_idx ON payment_requests (short_code);
 CREATE INDEX IF NOT EXISTS payment_requests_status_idx ON payment_requests (status);
 CREATE INDEX IF NOT EXISTS payment_requests_owner_idx ON payment_requests (owner_id);
+
+-- Additive migrations for databases created before USD-denominated requests.
+-- Idempotent so this file can run on every start.
+ALTER TABLE payment_requests ADD COLUMN IF NOT EXISTS usd_amount text;
+ALTER TABLE payment_requests ADD COLUMN IF NOT EXISTS zec_usd_price text;
+ALTER TABLE payment_requests ADD COLUMN IF NOT EXISTS price_provider text;
+ALTER TABLE payment_requests ADD COLUMN IF NOT EXISTS price_observed_at timestamptz;
 
 CREATE TABLE IF NOT EXISTS payment_events (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),

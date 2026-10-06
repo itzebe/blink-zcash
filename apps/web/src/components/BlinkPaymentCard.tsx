@@ -5,8 +5,11 @@ import { QrCode } from './QrCode';
 import { StatusBadge } from './Shell';
 
 export interface BlinkPaymentCardProps {
+  /** Settlement amount in ZEC (the value ZIP 321 carries). */
   amount: string;
   currency?: string;
+  /** Original requested amount in USD, shown alongside the ZEC settlement. */
+  usdAmount?: string | null;
   memo?: string | null;
   recipientName?: string | null;
   network?: 'testnet' | 'mainnet';
@@ -22,6 +25,7 @@ export interface BlinkPaymentCardProps {
 export function BlinkPaymentCard({
   amount,
   currency = 'ZEC',
+  usdAmount,
   memo,
   recipientName,
   network = 'testnet',
@@ -49,6 +53,9 @@ export function BlinkPaymentCard({
           {amount}
           <span className="payment-card__amount-symbol">{currency}</span>
         </div>
+        {usdAmount ? (
+          <div className="payment-card__amount-sub">≈ ${usdAmount} USD requested</div>
+        ) : null}
       </div>
 
       {memo ? <div className="payment-card__memo">“{memo}”</div> : null}

@@ -203,10 +203,17 @@ export default function PayPage({ params }: { params: Promise<{ shortCode: strin
               {request.amount}
               <span>ZEC</span>
             </h1>
+            {request.usdAmount ? (
+              <p className="lede">≈ ${request.usdAmount} USD requested</p>
+            ) : null}
             {request.memo ? <p className="lede">{request.memo}</p> : null}
           </div>
           <div className="card">
             <Row label="Recipient">{request.recipientName}</Row>
+            {request.usdAmount ? (
+              <Row label="Requested">${request.usdAmount} USD</Row>
+            ) : null}
+            <Row label="Settlement">{request.amount} ZEC</Row>
             <Row label="Network">{network === 'mainnet' ? 'Zcash Mainnet' : 'Zcash Testnet'}</Row>
             <Row label="Confirmations">{request.confirmations}</Row>
             {request.txidShort ? <Row label="Transaction">{request.txidShort}</Row> : null}
@@ -236,6 +243,7 @@ export default function PayPage({ params }: { params: Promise<{ shortCode: strin
           </div>
           <div className="card">
             <Row label="Amount">{request.amount} ZEC</Row>
+            {request.usdAmount ? <Row label="Requested">${request.usdAmount} USD</Row> : null}
             <Row label="Recipient">{request.recipientName}</Row>
             <Row label="Status">
               <StatusBadge
@@ -332,10 +340,16 @@ export default function PayPage({ params }: { params: Promise<{ shortCode: strin
           <div className="stack stack--sm">
             <p className="kicker">Confirm payment</p>
             <h1>{request.amount} ZEC</h1>
+            {request.usdAmount ? (
+              <p className="lede">
+                Requested ${request.usdAmount} USD · converted at 1 ZEC = ${request.zecUsdPrice} USD
+              </p>
+            ) : null}
           </div>
           {notice ? <Alert kind="warn">{notice}</Alert> : null}
           <div className="card">
             <Row label="Amount">{request.amount} ZEC</Row>
+            {request.usdAmount ? <Row label="Requested">${request.usdAmount} USD</Row> : null}
             <Row label="Recipient">{request.recipientName}</Row>
             {request.memo ? <Row label="Memo">{request.memo}</Row> : null}
             <Row label="Network">{network === 'mainnet' ? 'Zcash Mainnet' : 'Zcash Testnet'}</Row>
@@ -369,6 +383,7 @@ export default function PayPage({ params }: { params: Promise<{ shortCode: strin
         <BlinkPaymentCard
           amount={request.amount}
           currency="ZEC"
+          usdAmount={request.usdAmount}
           memo={request.memo}
           recipientName={request.recipientName}
           network={network}

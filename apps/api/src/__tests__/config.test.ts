@@ -62,4 +62,24 @@ describe('loadConfig verification guardrails', () => {
   it('rejects a web/API network mismatch', () => {
     expect(() => loadConfig({ ...base, NEXT_PUBLIC_NETWORK: 'mainnet' })).toThrow(/must match/);
   });
+
+  it('refuses coinmarketcap without an API key', () => {
+    expect(() => loadConfig({ ...base, BLINK_PRICE_PROVIDER: 'coinmarketcap' })).toThrow(
+      /COINMARKETCAP_API_KEY/,
+    );
+  });
+
+  it('accepts coinmarketcap with an API key', () => {
+    const config = loadConfig({
+      ...base,
+      BLINK_PRICE_PROVIDER: 'coinmarketcap',
+      COINMARKETCAP_API_KEY: 'test-key',
+    });
+    expect(config.BLINK_PRICE_PROVIDER).toBe('coinmarketcap');
+    expect(config.COINMARKETCAP_API_KEY).toBe('test-key');
+  });
+
+  it('defaults the price provider to none', () => {
+    expect(loadConfig(base).BLINK_PRICE_PROVIDER).toBe('none');
+  });
 });

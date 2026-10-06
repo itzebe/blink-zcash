@@ -89,7 +89,17 @@ Rust checks used in CI: `cargo fmt --all -- --check`,
 - **Memos are plaintext** (stored, shown, and encoded in the ZIP 321 URI). Only
   the recipient address is encrypted at rest. Never claim memos are encrypted.
 - **Local `npm ci` needs `NODE_ENV=development`** (or `--include=dev`); the shell
-  here exports `NODE_ENV=production`, which skips vitest/eslint.
+  here exports `NODE_ENV=production`, which skips vitest/eslint. `unset NODE_ENV`
+  before `next build`, or the prerender fails with a misleading `<Html>` error.
+- **USD-denominated requests.** A request may be denominated in USD, but ZIP 321
+  `amount` is always ZEC. The API converts server-side with exact BigInt math
+  (`packages/shared/src/money.ts`, `convertUsdToZec`) and snapshots
+  `usd_amount` / `zec_usd_price` / `price_provider` on the row so a later market
+  move cannot change a created request. The live rate comes from
+  `BLINK_PRICE_PROVIDER` (`none` default; `coinmarketcap` needs
+  `COINMARKETCAP_API_KEY`, server-side only, never returned by the API). With
+  `none`, USD requests fail 503 and ZEC requests still work. Never let a failed
+  conversion fall through as a ZEC amount.
 
 ## Repo
 
