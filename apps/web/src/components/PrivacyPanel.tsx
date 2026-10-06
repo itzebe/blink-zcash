@@ -1,12 +1,24 @@
-import type { PrivacyCapability } from '@blink/shared';
+import {
+  BLINK_APP_PRIVACY_NOTE,
+  privacyHeadline,
+  privacyHeadlineSentence,
+  type PrivacyCapability,
+} from '@blink/shared';
 
 /**
- * Protocol-accurate privacy disclosure.
+ * Protocol-accurate privacy disclosure, in two layers.
  *
- * Shows what Zcash actually protects for this route, derived from the recipient
- * address kind. It never says "anonymous" and never implies a transparent sender
- * is hidden. The sender row is labelled "Depends on payer" when the request
- * cannot determine the payer's pool.
+ * 1. A plain-language status for someone who has never used Zcash ("Shielded
+ *    payment" / "Public payment") and a one-sentence explanation of what a
+ *    stranger can see on the blockchain.
+ * 2. The per-fact breakdown, derived from the recipient address kind. It never
+ *    says "anonymous" and never implies a transparent sender is hidden; the
+ *    sender row is "Depends on payer" when the request cannot know the payer's
+ *    pool.
+ *
+ * A separate note distinguishes what the Zcash protocol protects from what BLINK
+ * itself stores, so the whole request is never labelled private when a memo is
+ * plaintext.
  */
 export function PrivacyPanel({
   privacy,
@@ -28,6 +40,12 @@ export function PrivacyPanel({
         <span className="privacy__kicker">Privacy</span>
         <span className="privacy__route">{privacy.routeLabel}</span>
       </div>
+      <p className="privacy__headline">
+        <span className="privacy__headline-mark" aria-hidden="true">
+          {privacy.level === 'shielded' ? '🛡' : '👁'}
+        </span>
+        {privacyHeadline(privacy)}
+      </p>
       <div className="privacy__facts">
         {facts.map((f) => (
           <span key={f.label} className={`privacy__fact privacy__fact--${f.fact}`}>
@@ -45,11 +63,11 @@ export function PrivacyPanel({
         ))}
       </div>
       {!compact ? (
-        <p className="privacy__note">
-          {privacy.recipient === 'public'
-            ? privacy.recipientStatement
-            : `${privacy.recipientStatement} ${privacy.senderStatement}`}
-        </p>
+        <>
+          <p className="privacy__note">{privacyHeadlineSentence(privacy)}</p>
+          {/* What the protocol protects vs. what BLINK the application handles. */}
+          <p className="privacy__app-note">{BLINK_APP_PRIVACY_NOTE}</p>
+        </>
       ) : null}
     </div>
   );

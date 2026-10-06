@@ -1,6 +1,7 @@
 'use client';
 
 import { ReactNode } from 'react';
+import { privacyHeadline, type PrivacyCapability } from '@blink/shared';
 import { QrCode } from './QrCode';
 import { StatusBadge } from './Shell';
 
@@ -13,6 +14,8 @@ export interface BlinkPaymentCardProps {
   memo?: string | null;
   recipientName?: string | null;
   network?: 'testnet' | 'mainnet';
+  /** Protocol-accurate privacy of this route; shown as the card's status tag. */
+  privacy?: PrivacyCapability | null;
   status?: string;
   statusLabel?: string;
   statusTone?: string;
@@ -29,6 +32,7 @@ export function BlinkPaymentCard({
   memo,
   recipientName,
   network = 'testnet',
+  privacy,
   status,
   statusLabel: label,
   statusTone: tone,
@@ -37,6 +41,14 @@ export function BlinkPaymentCard({
   actions,
   children,
 }: BlinkPaymentCardProps) {
+  // The tag states the actual privacy of the route when it is known, and the
+  // network otherwise (e.g. the marketing preview). It never claims "protected"
+  // for a transparent recipient.
+  const tag = privacy
+    ? privacyHeadline(privacy)
+    : network === 'mainnet'
+      ? 'Zcash Mainnet'
+      : 'Zcash Testnet';
   return (
     <div className="payment-card">
       <div className="payment-card__header">
@@ -44,7 +56,7 @@ export function BlinkPaymentCard({
           <span>BLINK</span>
         </div>
         <div className="payment-card__privacy-tag">
-          <span>{network === 'mainnet' ? 'Zcash Mainnet' : 'Protected by Zcash'}</span>
+          <span>{tag}</span>
         </div>
       </div>
 

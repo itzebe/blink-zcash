@@ -199,7 +199,7 @@ export default function PayPage({ params }: { params: Promise<{ shortCode: strin
             ✓
           </div>
           <div className="stack stack--sm">
-            <p className="kicker">Payment confirmed</p>
+            <p className="kicker">Payment complete</p>
             <h1 className="amount-hero">
               {request.amount}
               <span>ZEC</span>
@@ -215,10 +215,14 @@ export default function PayPage({ params }: { params: Promise<{ shortCode: strin
               <Row label="Requested">${request.usdAmount} USD</Row>
             ) : null}
             <Row label="Settlement">{request.amount} ZEC</Row>
-            <Row label="Network">{network === 'mainnet' ? 'Zcash Mainnet' : 'Zcash Testnet'}</Row>
+            <Row label="Purpose">{purposeLabel(request.purpose)}</Row>
+            <Row label="Network">{network === 'mainnet' ? 'Zcash mainnet' : 'Zcash testnet'}</Row>
             <Row label="Confirmations">{request.confirmations}</Row>
             {request.txidShort ? <Row label="Transaction">{request.txidShort}</Row> : null}
           </div>
+          {/* Privacy of the payment, in plain language, with the protocol-vs-app
+              distinction: Zcash protects the payment on-chain, BLINK stores the
+              request itself (memo in plaintext). */}
           <PrivacyPanel privacy={request.privacy} />
           <Link className="btn btn--ghost" href={`/receipt/${request.shortCode}`}>
             View receipt
@@ -390,6 +394,7 @@ export default function PayPage({ params }: { params: Promise<{ shortCode: strin
           memo={request.memo}
           recipientName={request.recipientName}
           network={network}
+          privacy={request.privacy}
           status={request.status}
           statusLabel={statusLabel(request.status)}
           statusTone={statusTone(request.status)}

@@ -28,6 +28,14 @@ import type { AddressKind } from './index.js';
 export type PrivacyFact = 'protected' | 'public' | 'varies';
 
 /**
+ * Coarse privacy tier of a route, from most to least private. Only two tiers
+ * exist: a route is shielded or it is not. There is deliberately no
+ * "partially-shielded" tier — it would imply a guarantee BLINK cannot make about
+ * a specific transaction.
+ */
+export type PrivacyLevel = 'shielded' | 'transparent';
+
+/**
  * The receiver pools a Unified Address exposes. `null` means "not applicable"
  * for a non-Unified address. When known, the most private available receiver is
  * listed first so the UI can state the best case the recipient can actually
@@ -66,7 +74,7 @@ export interface PrivacyCapability {
    * Coarse capability tier used for styling and ordering, from most to least
    * private. Not a guarantee about any specific transaction.
    */
-  level: 'shielded' | 'partially-shielded' | 'transparent';
+  level: PrivacyLevel;
   /** One-sentence, protocol-accurate summary. */
   summary: string;
   /**
@@ -214,3 +222,36 @@ export function privacyLines(capability: PrivacyCapability): PrivacyLine[] {
     { label: 'Memo', value: capability.memo === 'public' ? 'Plaintext' : fact(capability.memo), fact: capability.memo },
   ];
 }
+
+/**
+ * A short, plain-language status for the whole payment, for people who have
+ * never used Zcash. Deliberately two words: "Shielded payment" or "Public
+ * payment". It never claims the *sender* is hidden, because BLINK cannot know
+ * which pool the payer spends from.
+ */
+export function privacyHeadline(capability: PrivacyCapability): string {
+  return capability.level === 'shielded' ? 'Shielded payment' : 'Public payment';
+}
+
+/**
+ * One sentence explaining the headline to a non-expert, in terms of what a
+ * stranger can and cannot see on the public blockchain. It states the protocol
+ * fact only — the BLINK application-level caveat is a separate note.
+ */
+export function privacyHeadlineSentence(capability: PrivacyCapability): string {
+  return capability.level === 'shielded'
+    ? 'Zcash protects the recipient and the amount on the public blockchain. Whether the sender is visible depends on the wallet the payer uses.'
+    : 'On a public route, the recipient and the amount are visible to anyone on the Zcash blockchain. Privacy comes only from the payer using a shielded wallet.';
+}
+
+/**
+ * The one thing Zcash protocol privacy does NOT cover: information BLINK itself
+ * handles. Stated wherever privacy is explained, so the app never implies the
+ * whole request is private. The recipient address is encrypted at rest and kept
+ * out of the link, but the memo is plaintext and the request itself is a BLINK
+ * record.
+ */
+export const BLINK_APP_PRIVACY_NOTE =
+  'Zcash keeps the payment private on-chain. BLINK itself still stores this request: ' +
+  'the recipient address is encrypted at rest and never appears in the share link, ' +
+  'but the memo is stored and shown in plaintext. BLINK never holds your funds or keys.';
