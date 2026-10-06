@@ -60,6 +60,11 @@ export async function registerRoutes(app: FastifyInstance, deps: RouteDeps): Pro
     zcashEngineConfigured: Boolean(config.BLINK_ZCASH_SERVICE_URL),
     verificationProvider: config.BLINK_VERIFICATION_PROVIDER,
     priceProvider: config.BLINK_PRICE_PROVIDER,
+    // Presence-only diagnostic (never the key itself). When
+    // `BLINK_PRICE_PROVIDER=coinmarketcap` the config degrades to `none` if the
+    // key is empty, so this distinguishes "not configured" from "configured but
+    // failing" without exposing the secret.
+    priceKeyConfigured: config.COINMARKETCAP_API_KEY.length > 0,
   }));
 
   /**

@@ -90,12 +90,15 @@ Rust checks used in CI: `cargo fmt --all -- --check`,
   services that deploy from `main`. The API reports its effective providers at
   `/health` and its authoritative network at `/v1/meta/network`; the web app's
   `NetworkGuard` blocks the whole UI when `NEXT_PUBLIC_NETWORK` disagrees with
-  that. As of this session production was `network=mainnet`,
-  `verificationProvider=lightwalletd`, but **`priceProvider=none`**: the Render
-  Dashboard `COINMARKETCAP_API_KEY` is unset, so USD requests return 503 while ZEC
-  works. Set the key in the Dashboard and the API flips to `coinmarketcap` with no
-  redeploy. There is no Render API token in this environment, so that env var can
-  only be set through the Dashboard.
+  that. `/health` also exposes `priceKeyConfigured` (a boolean, never the key).
+  On mainnet, `BLINK_PRICE_PROVIDER=coinmarketcap` degrades to `none` **only when
+  `COINMARKETCAP_API_KEY` is empty in the running process** — the observed
+  `priceProvider: none` therefore means the key did not reach the process, not a
+  code fault. Verify the fix with `/health` (`priceProvider: coinmarketcap`,
+  `priceKeyConfigured: true`) and `/v1/price/zec-usd`. The key lives only in the
+  Render Dashboard env (never `NEXT_PUBLIC_*`, never in source); the CMC request
+  sends it in the `X-CMC_PRO_API_KEY` header, never the URL. There is no Render
+  API token in this environment, so that env var can only be set in the Dashboard.
 - **Engine cold starts on the free plan.** `blink-engine` (free) spins down when
   idle; the first request can 502 while it wakes, which surfaces as
   `invalid_address … non-JSON response (HTTP 502)` on request creation. Retry once
