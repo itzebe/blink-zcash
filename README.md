@@ -106,6 +106,39 @@ pools let the payment itself stay private while the *request* is shareable. BLIN
 is designed around that split — a public, shareable request and a private,
 shielded settlement.
 
+### Privacy capability, stated honestly
+
+BLINK classifies every request by the privacy the recipient's address actually
+provides, and shows that classification to both parties. It is derived from the
+address kind by the authoritative Rust engine and is never inferred from
+anything else:
+
+| Recipient address | Recipient | Amount | Sender |
+| --- | --- | --- | --- |
+| Unified (`u1…`) / Sapling (`zs1…`) | Protected | Protected | Depends on the payer |
+| Transparent (`t1…` / `t3…`) | Public | Public | Public |
+
+The sender row is deliberately "Depends on the payer": BLINK cannot know which
+pool the payer will spend from, and a payer using a transparent address is
+visible on-chain. BLINK therefore never labels a payment "anonymous" and never
+claims a transparent route is shielded. A transparent recipient is shown as
+**fully public** with a warning, because that is what it is.
+
+### Shielded use cases
+
+The Zecathon Shielded Payments track is about putting shielded Zcash to work.
+BLINK ships these as presets over the **one** request flow (a mode only
+pre-fills the same form; there is no separate mini-app and no fabricated
+transaction):
+
+- **Point of sale** — a short-expiry request a merchant can show as a QR code.
+- **Payroll** — a long-expiry request a business sends to each team member.
+- **Remittance** — a payment link shared in a chat, with the recipient address
+  never appearing in the link.
+- **Subscriptions** — a fresh, dated request issued each period. BLINK cannot
+  move funds on the payer's behalf, so a subscription is a request workflow, not
+  an automatic charge; the documentation and UI say exactly that.
+
 ## 7. How ZIP 321 is used
 
 [ZIP 321](https://zips.z.cash/zip-0321) defines the `zcash:` payment request URI
@@ -405,8 +438,15 @@ Full detail: [`SECURITY.md`](SECURITY.md) and
   payable.
 - **No wallet auto-detection yet.** "Pay with Zcash" uses the ZIP 321 URI and a
   wallet handoff; deep links into specific wallets are roadmap work.
-- **Testnet only.** Mainnet requires explicit operator configuration and a
-  working verification provider.
+- **Privacy depends on the recipient's pool, and BLINK says which.** A shielded
+  (Unified/Sapling) recipient hides the recipient and amount; a transparent
+  recipient is fully public and is labelled as such. The sender is never claimed
+  to be hidden, because BLINK cannot know which pool the payer spends from.
+- **Mainnet is live; mainnet payments are real money.** The deployed services
+  (see `render.yaml`) run mainnet with a real lightwalletd verification provider
+  and the CoinMarketCap price source. Mainnet is opt-in: a production API refuses
+  to start without a verification provider, and the web app hard-stops if its
+  build-time `NEXT_PUBLIC_NETWORK` disagrees with the API's `ZCASH_NETWORK`.
 - **USD requests need a live price source.** A request may be denominated in USD,
   but ZIP 321 carries ZEC, so the API converts at a live rate. When
   `BLINK_PRICE_PROVIDER` is unset or blank, the API auto-selects CoinMarketCap if
@@ -459,12 +499,22 @@ relevant ZIP), the documentation will say exactly what is disclosed.
 
 ## 20. Hackathon information
 
-BLINK was built as a hackathon MVP to demonstrate a genuinely standards-based
-private payment experience on Zcash. It targets Zcash Testnet, uses ZIP 321
-correctly, delegates address/URI authority to the official Zcash Rust crates, and
-refuses to claim anything about a payment it cannot observe. Contributions and
-security reports are welcome — see [`CONTRIBUTING.md`](CONTRIBUTING.md) and
-[`SECURITY.md`](SECURITY.md).
+BLINK is submitted to the **Zecathon Shielded Payments** track (point of sale,
+payroll, remittance, subscription). It is a genuinely standards-based private
+payment experience on Zcash:
+
+- **Real mainnet.** The deployed services run on Zcash mainnet with a real
+  lightwalletd verification provider and the authoritative CoinMarketCap price
+  source. Mainnet is opt-in and the stack refuses to mix networks.
+- **Standards-first.** ZIP 321 for the payment request; Unified/Sapling/transparent
+  address handling delegated to the official Zcash Rust crates, never reimplemented.
+- **Honest about privacy.** Every request exposes the actual privacy of its route
+  (shielded vs. transparent) and never over-claims. See §6.
+- **Honest about payment.** BLINK reports only what a real provider observed, and
+  issues a receipt that states plainly what it can and cannot prove. See §18.
+
+Contributions and security reports are welcome — see [`CONTRIBUTING.md`](CONTRIBUTING.md)
+and [`SECURITY.md`](SECURITY.md).
 
 ## License
 

@@ -16,8 +16,10 @@ import {
   formatZatoshisToZec,
   normaliseUsdAmount,
   parseZecToZatoshis,
+  privacyCapability,
   type Currency,
   type PaymentStatus,
+  type PrivacyCapability,
   type PublicPaymentRequest,
   type ZcashNetwork,
 } from '@blink/shared';
@@ -329,6 +331,10 @@ export class PaymentService {
     const label = input.label?.trim() || null;
     const message = input.message?.trim() || null;
 
+    // Snapshot the protocol-accurate privacy capability of this route from the
+    // recipient address kind. Stored so a receipt always reports what was shown.
+    const privacy = privacyCapability(kind);
+
     const uri = await this.buildUri(input.recipientAddress, canonicalAmount, memo, label, message);
 
     const now = this.now();
@@ -356,6 +362,7 @@ export class PaymentService {
         label,
         message,
         network: this.opts.network,
+        privacy,
         zip321Uri: uri,
         status: 'WAITING_FOR_PAYMENT',
         ownerId: input.ownerId ?? null,
@@ -418,9 +425,22 @@ export class PaymentService {
       status: row.status as PaymentStatus,
       confirmations: row.confirmations,
       txidShort: row.txid ? `${row.txid.slice(0, 8)}…${row.txid.slice(-6)}` : null,
+      privacy: this.privacyOf(row),
       expiresAt: row.expiresAt.toISOString(),
       createdAt: row.createdAt.toISOString(),
     };
+  }
+
+  /**
+   * The privacy capability for a row. Uses the stored snapshot, falling back to
+   * deriving it from the address kind for rows created before privacy was
+   * persisted. Never guesses beyond the address kind the request actually used.
+   */
+  privacyOf(row: typeof paymentRequests.$inferSelect): PrivacyCapability {
+    const stored = row.privacy as PrivacyCapability | null | undefined;
+    if (stored && typeof stored === 'object' && stored.recipientKind) return stored;
+    const kind = row.recipientAddressKind as AddressKind | null | undefined;
+    return privacyCapability(kind ?? 'transparent');
   }
 
   isExpired(row: typeof paymentRequests.$inferSelect): boolean {

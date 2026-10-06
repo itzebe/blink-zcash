@@ -111,4 +111,48 @@ test.describe('BLINK core flow', () => {
     await page.getByRole('button', { name: /open request/i }).click();
     await expect(page.locator('.alert--error')).toBeVisible();
   });
+
+  test('request screen previews the shielded privacy of a shielded address', async ({ page }) => {
+    await page.goto('/request');
+    await page.getByLabel('Your Zcash address').fill(TEST_SAPLING);
+    const panel = page.locator('.privacy--shielded');
+    await expect(panel).toBeVisible();
+    await expect(panel).toContainText(/shielded/i);
+    // Recipient and amount are protected; the sender is not over-claimed.
+    await expect(panel.locator('.privacy__fact--protected')).toHaveCount(2);
+    await expect(panel.locator('.privacy__fact--varies')).toHaveCount(1);
+  });
+
+  test('payer sees an accurate privacy disclosure and never the word anonymous', async ({
+    page,
+    request,
+  }) => {
+    const apiBase = process.env.E2E_API_URL ?? 'http://localhost:4000';
+    const created = await request.post(`${apiBase}/v1/payment-requests`, {
+      data: {
+        recipientName: 'Joseph',
+        recipientAddress: TEST_SAPLING,
+        amount: '5',
+        expiryMinutes: 30,
+      },
+    });
+    const { shortCode } = (await created.json()) as { shortCode };
+
+    await page.goto(`/pay/${shortCode}`);
+    const panel = page.locator('.privacy--shielded');
+    await expect(panel).toBeVisible();
+    await expect(panel.locator('.privacy__fact--varies')).toContainText(/depends on payer/i);
+    // BLINK must never claim more privacy than the protocol provides.
+    await expect(page.getByText(/anonymous/i)).toHaveCount(0);
+  });
+
+  test('use-case modes prefill the same request flow', async ({ page }) => {
+    await page.goto('/request');
+    await page.getByRole('button', { name: 'Point of sale' }).click();
+    await expect(page.getByLabel('Amount')).toHaveValue('5');
+    await expect(page.getByLabel('Memo (optional)')).toHaveValue('Point of sale');
+
+    await page.getByRole('button', { name: 'Payroll' }).click();
+    await expect(page.getByLabel('Amount')).toHaveValue('850');
+  });
 });

@@ -156,6 +156,7 @@ export async function registerRoutes(app: FastifyInstance, deps: RouteDeps): Pro
         addressKind: fresh.recipientAddressKind,
         addressFingerprint: fresh.recipientAddressFingerprint,
         network: fresh.network,
+        privacy: service.privacyOf(fresh),
         status,
         expiresAt: fresh.expiresAt.toISOString(),
       });
@@ -269,6 +270,7 @@ export async function registerRoutes(app: FastifyInstance, deps: RouteDeps): Pro
         zecUsdPrice: fresh.zecUsdPrice,
         memo: fresh.memo,
         network: fresh.network,
+        privacy: service.privacyOf(fresh),
         status: fresh.status,
         txid: fresh.txid,
         confirmations: fresh.confirmations,
@@ -281,4 +283,15 @@ export async function registerRoutes(app: FastifyInstance, deps: RouteDeps): Pro
 
   // Expose allowed expiry options so the client never invents one.
   app.get('/v1/meta/expiry-options', async () => ({ options: ALLOWED_EXPIRY_MINUTES }));
+
+  /**
+   * Authoritative network identity. The web app compares this against its own
+   * build-time NEXT_PUBLIC_NETWORK and fails closed on any disagreement, so a
+   * frontend can never silently transact on a different network than the API.
+   */
+  app.get('/v1/meta/network', async () => ({
+    network: config.ZCASH_NETWORK,
+    verificationProvider: config.BLINK_VERIFICATION_PROVIDER,
+    priceProvider: config.BLINK_PRICE_PROVIDER,
+  }));
 }
