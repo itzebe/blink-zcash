@@ -83,6 +83,39 @@ describe('loadConfig verification guardrails', () => {
     expect(loadConfig(base).BLINK_PRICE_PROVIDER).toBe('auto');
   });
 
+  it('treats a blank provider as unset rather than an invalid value', () => {
+    // `.env.example` ships `BLINK_PRICE_PROVIDER=`; a blank value must not refuse
+    // to boot.
+    expect(loadConfig({ ...base, BLINK_PRICE_PROVIDER: '' }).BLINK_PRICE_PROVIDER).toBe('auto');
+    expect(
+      loadConfig({ ...base, BLINK_PRICE_PROVIDER: '   ', COINMARKETCAP_API_KEY: 'k' })
+        .BLINK_PRICE_PROVIDER,
+    ).toBe('coinmarketcap');
+  });
+
+  it('keeps auto a resilient chain when a key is present (CoinMarketCap preferred inside it)', () => {
+    // `auto` must not collapse to a bare CoinMarketCap provider: the chain keeps
+    // the keyless sources behind it, so a bad/rate-limited key cannot take USD
+    // requests down. The chain prefers CoinMarketCap (see price-service tests).
+    expect(
+      loadConfig({ ...base, BLINK_PRICE_PROVIDER: 'auto', COINMARKETCAP_API_KEY: 'k' })
+        .BLINK_PRICE_PROVIDER,
+    ).toBe('auto');
+  });
+
+  it('keeps auto keyless when no key is present', () => {
+    expect(loadConfig({ ...base, BLINK_PRICE_PROVIDER: 'auto' }).BLINK_PRICE_PROVIDER).toBe('auto');
+  });
+
+  it('trims a whitespace-padded CoinMarketCap key so it is not treated as absent', () => {
+    const config = loadConfig({
+      ...base,
+      BLINK_PRICE_PROVIDER: 'coinmarketcap',
+      COINMARKETCAP_API_KEY: '  k  ',
+    });
+    expect(config.COINMARKETCAP_API_KEY).toBe('k');
+  });
+
   it('auto-selects CoinMarketCap when a key is present and no provider is set', () => {
     expect(loadConfig({ ...base, COINMARKETCAP_API_KEY: 'k' }).BLINK_PRICE_PROVIDER).toBe(
       'coinmarketcap',

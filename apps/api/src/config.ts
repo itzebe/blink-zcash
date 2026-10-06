@@ -51,17 +51,34 @@ const schema = z.object({
    *   coinmarketcap -> live ZEC/USD from CoinMarketCap (requires the key below).
    *   coingecko     -> live ZEC/USD from CoinGecko (keyless).
    *   coinbase      -> live ZEC/USD from Coinbase spot (keyless).
-   *   auto          -> try keyless sources in order (Coinbase, then CoinGecko).
+   *   auto          -> resilient chain: prefers CoinMarketCap when a key is
+   *                    configured, otherwise Coinbase then CoinGecko.
    *   none          -> USD requests are refused; ZEC requests still work.
    *
-   * When unset, the provider is auto-selected: CoinMarketCap if an API key is
-   * present (so a deployment that provisions the key uses it), otherwise the
-   * keyless `auto` chain. Either way the rate is a real live observation, never
-   * a fabricated fallback.
+   * When unset (or blank, as `.env.example` ships it), the provider is
+   * auto-selected: CoinMarketCap if an API key is present, otherwise the keyless
+   * `auto` chain. `auto` itself prefers CoinMarketCap when a key is present and
+   * otherwise falls back to the keyless chain. Either way the rate is a real live
+   * observation, never a fabricated fallback.
    */
-  BLINK_PRICE_PROVIDER: z.enum(['none', 'coinmarketcap', 'coingecko', 'coinbase', 'auto']).optional(),
+  BLINK_PRICE_PROVIDER: z
+    .preprocess(
+      // An empty value is the documented "not set" state, not an invalid enum
+      // member: a blank `BLINK_PRICE_PROVIDER=` must auto-select rather than
+      // refuse to boot. Whitespace is trimmed for the same reason.
+      (value) => {
+        if (typeof value !== 'string') return value;
+        const trimmed = value.trim();
+        return trimmed === '' ? undefined : trimmed;
+      },
+      z.enum(['none', 'coinmarketcap', 'coingecko', 'coinbase', 'auto']).optional(),
+    ),
   /** CoinMarketCap API key. Server-side only; never exposed to the browser. */
-  COINMARKETCAP_API_KEY: z.string().optional().default(''),
+  COINMARKETCAP_API_KEY: z
+    .string()
+    .optional()
+    .default('')
+    .transform((value) => value.trim()),
   BLINK_PRICE_CACHE_TTL_MS: z.coerce.number().int().min(0).default(60_000),
   BLINK_PRICE_TIMEOUT_MS: z.coerce.number().int().positive().default(5_000),
 
@@ -111,15 +128,17 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     throw new Error('BLINK_VERIFICATION_PROVIDER=node-rpc requires ZCASH_RPC_URL');
   }
 
-  // USD-denominated requests need a live price source. Auto-select CoinMarketCap
-  // when a key is present, otherwise the keyless `auto` chain (Coinbase, then
-  // CoinGecko). If the operator explicitly selects CoinMarketCap, the key must be
-  // present or every USD request would fail at runtime; refuse at startup so it
-  // is obvious.
-  const priceProvider =
-    parsed.BLINK_PRICE_PROVIDER ??
-    (parsed.COINMARKETCAP_API_KEY ? 'coinmarketcap' : 'auto');
-  if (priceProvider === 'coinmarketcap' && !parsed.COINMARKETCAP_API_KEY) {
+  // Resolve the effective price provider. When unset/blank the provider is
+  // auto-selected: CoinMarketCap if a key is present, otherwise the keyless
+  // `auto` chain. `auto` itself is a resilient chain that prefers CoinMarketCap
+  // when a key is configured (so a deployment that provisions the key actually
+  // uses it) and otherwise falls back to the keyless sources, without ever
+  // inventing a price. Selecting CoinMarketCap without a key is refused at
+  // startup so the failure is obvious rather than surfacing as a 503 on the
+  // first USD request.
+  const hasCmcKey = parsed.COINMARKETCAP_API_KEY.length > 0;
+  const priceProvider = parsed.BLINK_PRICE_PROVIDER ?? (hasCmcKey ? 'coinmarketcap' : 'auto');
+  if (priceProvider === 'coinmarketcap' && !hasCmcKey) {
     throw new Error('BLINK_PRICE_PROVIDER=coinmarketcap requires COINMARKETCAP_API_KEY');
   }
 

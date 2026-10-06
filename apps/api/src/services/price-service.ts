@@ -297,8 +297,9 @@ export class CoinbasePriceProvider extends HttpPriceProvider {
  * Tries each provider in order and returns the first live observation. Providers
  * are independent live sources, not fallback values: a hard failure in one is
  * retried against the next, and if all fail the last error is thrown. No price
- * is ever invented. Used by the `auto` provider so a keyless deployment stays
- * working even when one public source rate-limits the host.
+ * is ever invented. Used by the `auto` provider so a deployment with no
+ * CoinMarketCap key still offers USD requests, and so one public source
+ * rate-limiting the host does not take the whole flow down.
  */
 export class ChainedPriceProvider implements ZecUsdPriceProvider {
   readonly name: string;
@@ -349,11 +350,18 @@ export function createZecUsdPriceProvider(
     case 'coinbase':
       return new CoinbasePriceProvider(shared);
     case 'auto':
-      // Coinbase first (generous limits), CoinGecko as a second live source.
-      return new ChainedPriceProvider([
-        new CoinbasePriceProvider(shared),
-        new CoinGeckoPriceProvider(shared),
-      ]);
+      // Prefer CoinMarketCap when a key is configured, then the keyless sources
+      // (Coinbase, CoinGecko). A bad or rate-limited key still falls through to a
+      // live keyless price rather than failing the request.
+      return new ChainedPriceProvider(
+        config.COINMARKETCAP_API_KEY
+          ? [
+              new CoinMarketCapPriceProvider({ apiKey: config.COINMARKETCAP_API_KEY, ...shared }),
+              new CoinbasePriceProvider(shared),
+              new CoinGeckoPriceProvider(shared),
+            ]
+          : [new CoinbasePriceProvider(shared), new CoinGeckoPriceProvider(shared)],
+      );
     default:
       return new DisabledPriceProvider();
   }
