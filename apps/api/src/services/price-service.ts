@@ -53,7 +53,9 @@ export interface PriceProviderOptions {
 
 const CMC_BASE_URL = 'https://pro-api.coinmarketcap.com';
 /** CoinMarketCap id for Zcash. */
-const ZEC_ID = '328';
+const ZEC_ID = '1437';
+/** CoinMarketCap symbol for Zcash, asserted on the returned entry. */
+const ZEC_SYMBOL = 'ZEC';
 const COINGECKO_BASE_URL = 'https://api.coingecko.com';
 /** CoinGecko id for Zcash. */
 const COINGECKO_ID = 'zcash';
@@ -153,7 +155,7 @@ abstract class HttpPriceProvider implements ZecUsdPriceProvider {
  * CoinMarketCap ZEC/USD price provider.
  *
  * Uses the Quotes Latest endpoint (`/v3/cryptocurrency/quotes/latest`) with
- * `id=328` (Zcash) and `convert=USD`. Requires a server-side API key.
+ * `id=1437` (Zcash) and `convert=USD`. Requires a server-side API key.
  */
 export class CoinMarketCapPriceProvider extends HttpPriceProvider {
   readonly name: string;
@@ -182,18 +184,68 @@ export class CoinMarketCapPriceProvider extends HttpPriceProvider {
     };
   }
 
-  /** Pull the ZEC/USD price out of a CoinMarketCap Quotes Latest payload. */
+  /**
+   * Pull the ZEC/USD price out of a CoinMarketCap Quotes Latest payload.
+   *
+   * CoinMarketCap has shipped two shapes for this endpoint: an id-keyed object
+   * (`data["1437"].quote.USD`) and, on the v3 line, arrays (`data[0].quote[0]`).
+   * Both are accepted, but the entry is only trusted when it actually identifies
+   * ZEC and the quote actually identifies USD, so a mis-addressed id (the old
+   * `id=328` returned Monero) can never be reported as a Zcash price.
+   */
   protected extract(payload: unknown): ZecUsdPrice {
     const data =
       payload && typeof payload === 'object'
-        ? (payload as { data?: Record<string, unknown> }).data
+        ? (payload as { data?: unknown }).data
         : undefined;
-    const zec = data?.[ZEC_ID];
+
+    // Accept either `data` as an array of entries or as an id-keyed object.
+    let entries: unknown[];
+    if (Array.isArray(data)) {
+      entries = data;
+    } else if (data && typeof data === 'object') {
+      const byId = (data as Record<string, unknown>)[ZEC_ID];
+      entries = byId === undefined ? Object.values(data as Record<string, unknown>) : [byId];
+    } else {
+      entries = [];
+    }
+
+    const zec = entries.find((entry) => {
+      if (!entry || typeof entry !== 'object') return false;
+      const id = (entry as { id?: unknown }).id;
+      const symbol = (entry as { symbol?: unknown }).symbol;
+      // Trust by id when present, else by symbol; require the entry to name ZEC.
+      if (id !== undefined && id !== null) return String(id) === ZEC_ID;
+      return typeof symbol === 'string' && symbol.toUpperCase() === ZEC_SYMBOL;
+    });
     if (!zec || typeof zec !== 'object') {
       throw new PriceUnavailableError('price provider response did not contain ZEC', 'bad_response');
     }
-    const quote = (zec as { quote?: Record<string, unknown> }).quote;
-    const usd = quote?.USD;
+
+    const quoteRaw = (zec as { quote?: unknown }).quote;
+    // The quote is either an object keyed by currency (`quote.USD`) or an array
+    // of quotes each carrying their currency in `symbol`.
+    let usd: unknown;
+    if (Array.isArray(quoteRaw)) {
+      usd = quoteRaw.find(
+        (q) =>
+          q &&
+          typeof q === 'object' &&
+          typeof (q as { symbol?: unknown }).symbol === 'string' &&
+          (q as { symbol: string }).symbol.toUpperCase() === 'USD',
+      );
+    } else if (quoteRaw && typeof quoteRaw === 'object') {
+      const keyed = quoteRaw as Record<string, unknown>;
+      usd =
+        keyed.USD ??
+        Object.values(keyed).find(
+          (q) =>
+            q &&
+            typeof q === 'object' &&
+            typeof (q as { symbol?: unknown }).symbol === 'string' &&
+            (q as { symbol: string }).symbol.toUpperCase() === 'USD',
+        );
+    }
     if (!usd || typeof usd !== 'object') {
       throw new PriceUnavailableError('price provider response had no USD quote', 'bad_response');
     }

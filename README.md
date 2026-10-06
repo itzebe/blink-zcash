@@ -7,9 +7,11 @@ A recipient creates a payment request; BLINK produces a shareable link and a QR
 code. The payer opens the link and pays from their own Zcash wallet. Nobody ever
 copies a wallet address.
 
-> **Status: hackathon MVP on Zcash Testnet.** BLINK does not hold funds and
-> cannot move them. It creates ZIP 321 payment requests and reports what it can
-> honestly observe about the resulting transaction. No mainnet use yet.
+> **Status: production is Zcash Mainnet.** BLINK does not hold funds and cannot
+> move them. It creates ZIP 321 payment requests and reports only what it can
+> honestly observe about the resulting transaction through a real lightwalletd
+> endpoint. Local development and CI default to testnet; the deployed services
+> (see `render.yaml`) run mainnet.
 
 ---
 
@@ -150,7 +152,9 @@ to ZEC server-side at a live rate and the URI/QR always encode the ZEC amount.
   then CoinGecko). Selecting `auto` builds the same chain: with the key present
   CoinMarketCap is tried first, with the keyless sources behind it. `none`
   refuses USD requests
-  while ZEC requests keep working.
+  while ZEC requests keep working. Production mainnet requires
+  `BLINK_PRICE_PROVIDER=coinmarketcap` with a key; the API refuses to boot
+  otherwise, so a mainnet USD request can never be priced from a keyless source.
 - The original request is snapshotted: `usd_amount`, `zec_usd_price` and
   `price_provider` are stored alongside the ZEC `amount`, so a later market move
   cannot change an already-created request. The payer sees both figures.

@@ -1,7 +1,7 @@
 /**
- * Live BLINK end-to-end verification flow against REAL Zcash testnet.
+ * Live BLINK end-to-end verification flow against a REAL Zcash network.
  *
- * It uses a real transaction already mined on testnet and its own transparent
+ * It uses a real transaction already mined on the selected network and its own
  * recipient address (recovered from the transaction's scriptPubKey), so the
  * payment request and the observed transaction genuinely share an address.
  *
@@ -27,8 +27,13 @@ const client = new Ctor(LWD.replace(/^https?:\/\//, ''), grpc.credentials.create
 const rpc = (m, r) =>
   new Promise((res, rej) => client[m](r, { deadline: Date.now() + 15000 }, (e, x) => (e ? rej(e) : res(x))));
 
-// --- base58check for transparent testnet addresses ---
+// --- base58check for transparent addresses (network-aware) ---
 const B58 = '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz';
+// Transparent version bytes differ per network: a testnet address must never be
+// built (or accepted) for a mainnet run, and vice versa.
+const NETWORK = (process.env.ZCASH_NETWORK ?? 'testnet').toLowerCase();
+const P2PKH_VERSION = NETWORK === 'mainnet' ? 0x1cb8 : 0x1d25;
+const P2SH_VERSION = NETWORK === 'mainnet' ? 0x1cbd : 0x1cba;
 function b58(buf) {
   let n = BigInt('0x' + buf.toString('hex'));
   let out = '';
@@ -47,11 +52,11 @@ function b58check(version, hash20) {
 function addressFromScript(script) {
   // P2PKH: OP_DUP OP_HASH160 <20> OP_EQUALVERIFY OP_CHECKSIG
   if (script.length === 25 && script[0] === 0x76 && script[1] === 0xa9 && script[2] === 0x14 && script[23] === 0x88 && script[24] === 0xac) {
-    return { kind: 'P2PKH', addr: b58check(0x1d25, script.subarray(3, 23)), value: null };
+    return { kind: 'P2PKH', addr: b58check(P2PKH_VERSION, script.subarray(3, 23)), value: null };
   }
   // P2SH: OP_HASH160 <20> OP_EQUAL
   if (script.length === 23 && script[0] === 0xa9 && script[1] === 0x14 && script[22] === 0x87) {
-    return { kind: 'P2SH', addr: b58check(0x1cba, script.subarray(2, 22)), value: null };
+    return { kind: 'P2SH', addr: b58check(P2SH_VERSION, script.subarray(2, 22)), value: null };
   }
   return null;
 }
@@ -70,7 +75,7 @@ const api = async (method, path, body, headers = {}) => {
 
 try {
   const tip = Number((await rpc('GetLatestBlock', {})).height);
-  console.log('testnet tip:', tip);
+  console.log(NETWORK + ' tip:', tip);
 
   // Find a recent block whose last tx pays a transparent address.
   const offset = Number(process.env.BLINK_BLOCK_OFFSET ?? 2);
@@ -90,7 +95,7 @@ try {
 
   // 1. Create a real payment request to that (real) address.
   const created = await api('POST', '/v1/payment-requests', {
-    recipientName: 'Live Testnet Recipient',
+    recipientName: 'Live ' + NETWORK + ' Recipient',
     recipientAddress: pick.addr,
     amount: '0.001',
     currency: 'ZEC',

@@ -142,6 +142,23 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     throw new Error('BLINK_PRICE_PROVIDER=coinmarketcap requires COINMARKETCAP_API_KEY');
   }
 
+  // A real mainnet deployment must price USD requests from the configured,
+  // authoritative source, or not price them at all. Refuse to run mainnet in
+  // production with a keyless or `auto` price provider, so a mainnet USD request
+  // can never be silently priced from an unconfigured source. `none` is allowed:
+  // it disables USD requests (they return 503) while ZEC requests keep working.
+  if (
+    isProduction &&
+    parsed.ZCASH_NETWORK === 'mainnet' &&
+    priceProvider !== 'coinmarketcap' &&
+    priceProvider !== 'none'
+  ) {
+    throw new Error(
+      'Mainnet requires BLINK_PRICE_PROVIDER=coinmarketcap (with COINMARKETCAP_API_KEY) ' +
+        `or none; refusing to price USD requests from "${priceProvider}"`,
+    );
+  }
+
   return {
     ...parsed,
     BLINK_PRICE_PROVIDER: priceProvider,
