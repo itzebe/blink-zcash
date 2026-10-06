@@ -286,7 +286,7 @@ describe('USD-denominated payment requests', () => {
     expect(body.error).toBe('conversion_failed');
   });
 
-  it('rejects a USD amount that does not map to whole zatoshis', async () => {
+  it('rounds a non-whole-zatoshi USD amount UP to the next zatoshi', async () => {
     priceProvider.price = {
       provider: 'coinmarketcap',
       asset: 'ZEC',
@@ -295,8 +295,37 @@ describe('USD-denominated payment requests', () => {
       observedAt: null,
     };
     const { status, body } = await createUsd({ amount: '25' });
-    expect(status).toBe(400);
-    expect(body.error).toBe('amount_not_representable');
+    expect(status).toBe(201);
+    // 2500 / 4025 * 1e8 = 62_111_801.24... zatoshis -> rounded up to 62_111_802.
+    expect(body.request.amount).toBe('0.62111802');
+    expect(body.request.usdAmount).toBe('25');
+    expect(body.request.zecUsdPrice).toBe('40.25');
+    // Never the raw USD number, and never rounded down.
+    expect(body.request.amount).not.toBe('25');
+    expect(body.zip321Uri).toContain('amount=0.62111802');
+    expect(body.zip321Uri).not.toContain('amount=25');
+  });
+
+  it('handles a realistic high ZEC price for $1 and $25 without treating USD as ZEC', async () => {
+    priceProvider.price = {
+      provider: 'coinmarketcap',
+      asset: 'ZEC',
+      quote: 'USD',
+      price: '1365.99',
+      observedAt: '2026-10-06T00:00:00.000Z',
+    };
+    const one = await createUsd({ amount: '1' });
+    expect(one.status).toBe(201);
+    expect(one.body.request.amount).toBe('0.00073207');
+    expect(one.body.zip321Uri).toContain('amount=0.00073207');
+    expect(one.body.zip321Uri).not.toMatch(/amount=1(&|$)/);
+
+    const twentyFive = await createUsd({ amount: '25' });
+    expect(twentyFive.status).toBe(201);
+    expect(twentyFive.body.request.amount).toBe('0.01830175');
+    expect(twentyFive.body.request.usdAmount).toBe('25');
+    expect(twentyFive.body.zip321Uri).toContain('amount=0.01830175');
+    expect(twentyFive.body.zip321Uri).not.toContain('amount=25');
   });
 
   it('rejects malformed USD amounts', async () => {

@@ -287,20 +287,16 @@ export class PaymentService {
       );
     }
 
-    // The exact quotient was not a whole number of zatoshis. Rather than silently
-    // rounding (and mis-stating the amount the payer is asked for), refuse and
-    // tell the recipient to adjust the USD amount.
-    if (conversion.rounded) {
-      throw new PaymentRequestError(
-        `USD amount does not convert to a whole number of zatoshis at 1 ZEC = $${price.price} ` +
-          `(≈ ${conversion.zec} ZEC); adjust the USD amount`,
-        'amount_not_representable',
-      );
-    }
+    // USD almost never converts to a whole number of zatoshis (1 ZEC = 1e8
+    // zatoshis). Round UP to the next zatoshi so the request always asks for at
+    // least the USD-equivalent value; the difference is < 1 zatoshi (1e-8 ZEC).
+    // Never round down, which would under-ask the payer, and never round the
+    // amount to a whole ZEC (the USD input must not be mistaken for ZEC).
+    const settledZatoshis = conversion.rounded ? conversion.zatoshis + 1n : conversion.zatoshis;
 
     return {
       currency,
-      zecAmount: conversion.zec,
+      zecAmount: formatZatoshisToZec(settledZatoshis),
       usdAmount: conversion.usd,
       zecUsdPrice: conversion.price,
       priceProvider: price.provider,
