@@ -7,9 +7,13 @@ export function Shell({ children, wide = false }: { children: ReactNode; wide?: 
 
 /**
  * Network badge. Mainnet is rendered in the danger colour so it is impossible to
- * mistake a real-funds session for a test session.
+ * mistake a real-funds session for a test session. A null network (still loading,
+ * or unknown) renders a neutral badge rather than guessing testnet.
  */
-export function NetworkPill({ network }: { network: 'testnet' | 'mainnet' }) {
+export function NetworkPill({ network }: { network: 'testnet' | 'mainnet' | null }) {
+  if (network === null) {
+    return <span className="network-pill">Zcash</span>;
+  }
   const isMainnet = network === 'mainnet';
   return (
     <span className={isMainnet ? 'network-pill network-pill--mainnet' : 'network-pill'}>
@@ -18,7 +22,13 @@ export function NetworkPill({ network }: { network: 'testnet' | 'mainnet' }) {
   );
 }
 
-export function TopBar({ network, right }: { network: 'testnet' | 'mainnet'; right?: ReactNode }) {
+export function TopBar({
+  network,
+  right,
+}: {
+  network: 'testnet' | 'mainnet' | null;
+  right?: ReactNode;
+}) {
   return (
     <header className="topbar">
       <Link href="/" className="wordmark" aria-label="BLINK home">

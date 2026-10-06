@@ -225,5 +225,7 @@ test.describe('privacy, payment links and receipts', () => {
     await expect(page.locator('.alert--error')).toBeVisible();
     // The headline is honest: no receipt is shown for an unconfirmed request.
     await expect(page.getByText(/only issued for a confirmed payment/i)).toBeVisible();
+    // The network badge never guesses a network it does not know.
+    await expect(page.locator('.network-pill')).toHaveText('Zcash');
   });
 });
