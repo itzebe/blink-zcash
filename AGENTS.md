@@ -99,7 +99,8 @@ Rust checks used in CI: `cargo fmt --all -- --check`,
   `settledZecAmount` rounds UP to the next zatoshi (over-ask < 1 zatoshi); both
   the API and the web preview call it, so they always agree. The live rate comes
   from `BLINK_PRICE_PROVIDER` (auto-selected: `coinmarketcap` when
-  `COINMARKETCAP_API_KEY` is set, else keyless `coingecko`; `none` disables USD
+  `COINMARKETCAP_API_KEY` is set, else the keyless `auto` chain (Coinbase, then
+  CoinGecko); `none` disables USD
   with a 503 while ZEC still works; `coinmarketcap` needs
   `COINMARKETCAP_API_KEY`, server-side only, never returned by the API). Never
   let a failed conversion fall through as a ZEC amount.

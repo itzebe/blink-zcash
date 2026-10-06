@@ -146,7 +146,8 @@ to ZEC server-side at a live rate and the URI/QR always encode the ZEC amount.
   figure.
 - The live rate comes from a configurable price source (`BLINK_PRICE_PROVIDER`).
   When it is unset the API auto-selects: CoinMarketCap if `COINMARKETCAP_API_KEY`
-  is set, otherwise the keyless CoinGecko source. `none` refuses USD requests
+  is set, otherwise the keyless `auto` chain (Coinbase, then CoinGecko). `none`
+  refuses USD requests
   while ZEC requests keep working.
 - The original request is snapshotted: `usd_amount`, `zec_usd_price` and
   `price_provider` are stored alongside the ZEC `amount`, so a later market move
@@ -229,7 +230,7 @@ All configuration is via the environment; nothing is hard-coded. See
 | `BLINK_VERIFICATION_PROVIDER` | `none` (default), `node-rpc`, or `lightwalletd` |
 | `BLINK_LIGHTWALLETD_URL` | lightwalletd gRPC endpoint; required when the provider is `lightwalletd` |
 | `BLINK_CONFIRMATIONS_REQUIRED` | confirmations before a payment reads `CONFIRMED` (default `1`) |
-| `BLINK_PRICE_PROVIDER` | `coinmarketcap`, `coingecko`, or `none`; enables USD-denominated requests. When unset, auto-selects CoinMarketCap if `COINMARKETCAP_API_KEY` is present, else the keyless CoinGecko source. `coinmarketcap` requires the key or the API refuses to start |
+| `BLINK_PRICE_PROVIDER` | `coinmarketcap`, `coinbase`, `coingecko`, `auto`, or `none`; enables USD-denominated requests. When unset, auto-selects CoinMarketCap if `COINMARKETCAP_API_KEY` is present, else the keyless `auto` chain (Coinbase, then CoinGecko). `coinmarketcap` requires the key or the API refuses to start |
 | `COINMARKETCAP_API_KEY` | server-side key for the live ZEC/USD rate when the provider is `coinmarketcap` (never exposed to the browser) |
 | `BLINK_PRICE_CACHE_TTL_MS` / `BLINK_PRICE_TIMEOUT_MS` | price cache window and request timeout (ms) |
 | `ZCASH_RPC_URL` / `ZCASH_RPC_USER` / `ZCASH_RPC_PASSWORD` | full-node RPC, if used |
@@ -401,7 +402,8 @@ Full detail: [`SECURITY.md`](SECURITY.md) and
 - **USD requests need a live price source.** A request may be denominated in USD,
   but ZIP 321 carries ZEC, so the API converts at a live rate. When
   `BLINK_PRICE_PROVIDER` is unset, the API auto-selects CoinMarketCap if
-  `COINMARKETCAP_API_KEY` is configured, otherwise the keyless CoinGecko source,
+  `COINMARKETCAP_API_KEY` is configured, otherwise the keyless `auto` chain
+  (Coinbase, then CoinGecko),
   so USD requests work on the deployed demo without a key. If an operator sets
   `BLINK_PRICE_PROVIDER=none`, USD requests are refused with a 503 and only
   native ZEC requests work. The rate is snapshotted at creation, so the ZEC

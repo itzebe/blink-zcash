@@ -79,8 +79,8 @@ describe('loadConfig verification guardrails', () => {
     expect(config.COINMARKETCAP_API_KEY).toBe('test-key');
   });
 
-  it('auto-selects the keyless coingecko provider when no key is present', () => {
-    expect(loadConfig(base).BLINK_PRICE_PROVIDER).toBe('coingecko');
+  it('auto-selects the keyless auto chain when no key is present', () => {
+    expect(loadConfig(base).BLINK_PRICE_PROVIDER).toBe('auto');
   });
 
   it('auto-selects CoinMarketCap when a key is present and no provider is set', () => {

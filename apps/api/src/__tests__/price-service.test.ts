@@ -7,8 +7,10 @@
  */
 import { describe, expect, it, vi } from 'vitest';
 import {
-  CoinMarketCapPriceProvider,
+  ChainedPriceProvider,
+  CoinbasePriceProvider,
   CoinGeckoPriceProvider,
+  CoinMarketCapPriceProvider,
   PriceUnavailableError,
   createZecUsdPriceProvider,
 } from '../services/price-service.js';
@@ -207,6 +209,67 @@ describe('CoinGeckoPriceProvider', () => {
   });
 });
 
+describe('CoinbasePriceProvider', () => {
+  function coinbasePayload(amount: number) {
+    return { data: { amount: String(amount), base: 'ZEC', currency: 'USD' } };
+  }
+  function makeCoinbase(fetchImpl: typeof fetch, overrides: Record<string, unknown> = {}) {
+    return new CoinbasePriceProvider({ cacheTtlMs: 0, fetchImpl, ...overrides });
+  }
+
+  it('normalizes a valid ZEC/USD spot response', async () => {
+    const fetchImpl = vi.fn(async () =>
+      jsonResponse(coinbasePayload(1365.315)),
+    ) as unknown as typeof fetch;
+    const price = await makeCoinbase(fetchImpl).getZecUsdPrice();
+    expect(price).toMatchObject({
+      provider: 'coinbase',
+      asset: 'ZEC',
+      quote: 'USD',
+      price: '1365.315',
+    });
+    expect(typeof price.observedAt).toBe('string');
+    expect(Number.isNaN(Date.parse(price.observedAt!))).toBe(false);
+  });
+
+  it('needs no API key and sends no authorization header', async () => {
+    const fetchImpl = vi.fn(async (url: string, init?: RequestInit) => {
+      expect(String(url)).toContain('/v2/prices/ZEC-USD/spot');
+      const headers = (init?.headers ?? {}) as Record<string, string>;
+      expect(Object.keys(headers)).toEqual(['accept']);
+      return jsonResponse(coinbasePayload(40));
+    }) as unknown as typeof fetch;
+    await makeCoinbase(fetchImpl).getZecUsdPrice();
+    expect(fetchImpl).toHaveBeenCalledOnce();
+  });
+
+  it('throws (never fabricates) on a wrong-pair payload', async () => {
+    const fetchImpl = vi.fn(async () =>
+      jsonResponse({ data: { amount: '1', base: 'BTC', currency: 'USD' } }),
+    ) as unknown as typeof fetch;
+    await expect(makeCoinbase(fetchImpl).getZecUsdPrice()).rejects.toMatchObject({
+      code: 'bad_response',
+    });
+  });
+});
+
+describe('ChainedPriceProvider', () => {
+  it('returns the first provider that succeeds', async () => {
+    const ok = { name: 'ok', getZecUsdPrice: vi.fn(async () => ({ provider: 'ok', asset: 'ZEC', quote: 'USD', price: '1', observedAt: null })) };
+    const never = { name: 'never', getZecUsdPrice: vi.fn(async () => { throw new Error('x'); }) };
+    const chain = new ChainedPriceProvider([never, ok]);
+    const price = await chain.getZecUsdPrice();
+    expect(price.provider).toBe('ok');
+    expect(never.getZecUsdPrice).toHaveBeenCalledOnce();
+  });
+
+  it('rethrows the last error when every provider fails', async () => {
+    const bad = () => ({ name: 'bad', getZecUsdPrice: async () => { throw new PriceUnavailableError('nope', 'provider_error'); } });
+    const chain = new ChainedPriceProvider([bad(), bad()]);
+    await expect(chain.getZecUsdPrice()).rejects.toMatchObject({ code: 'provider_error' });
+  });
+});
+
 describe('createZecUsdPriceProvider', () => {
   it('returns a disabled provider when the provider is none', async () => {
     const provider = createZecUsdPriceProvider({
@@ -236,5 +299,25 @@ describe('createZecUsdPriceProvider', () => {
       BLINK_PRICE_TIMEOUT_MS: 1000,
     });
     expect(provider.name).toBe('coingecko');
+  });
+
+  it('builds a keyless Coinbase provider when selected', () => {
+    const provider = createZecUsdPriceProvider({
+      BLINK_PRICE_PROVIDER: 'coinbase',
+      COINMARKETCAP_API_KEY: '',
+      BLINK_PRICE_CACHE_TTL_MS: 0,
+      BLINK_PRICE_TIMEOUT_MS: 1000,
+    });
+    expect(provider.name).toBe('coinbase');
+  });
+
+  it('builds the keyless auto chain when selected', () => {
+    const provider = createZecUsdPriceProvider({
+      BLINK_PRICE_PROVIDER: 'auto',
+      COINMARKETCAP_API_KEY: '',
+      BLINK_PRICE_CACHE_TTL_MS: 0,
+      BLINK_PRICE_TIMEOUT_MS: 1000,
+    });
+    expect(provider.name).toBe('auto');
   });
 });

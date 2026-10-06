@@ -57,6 +57,7 @@ const ZEC_ID = '328';
 const COINGECKO_BASE_URL = 'https://api.coingecko.com';
 /** CoinGecko id for Zcash. */
 const COINGECKO_ID = 'zcash';
+const COINBASE_BASE_URL = 'https://api.coinbase.com';
 
 /** Parse an optional provider timestamp into a canonical ISO string. */
 function parseTimestamp(value: unknown): string | null {
@@ -251,8 +252,81 @@ class DisabledPriceProvider implements ZecUsdPriceProvider {
   }
 }
 
+/**
+ * Coinbase ZEC/USD price provider.
+ *
+ * Uses the public spot-price endpoint, which needs no API key and has generous
+ * unauthenticated limits, so a deployment can offer USD requests without
+ * provisioning a secret. Every failure is surfaced, never a fabricated price.
+ */
+export class CoinbasePriceProvider extends HttpPriceProvider {
+  readonly name = 'coinbase';
+
+  protected request(): { url: string; headers: Record<string, string> } {
+    return {
+      url: `${COINBASE_BASE_URL}/v2/prices/ZEC-USD/spot`,
+      headers: { accept: 'application/json' },
+    };
+  }
+
+  /** Pull the ZEC/USD price out of a Coinbase spot-price payload. */
+  protected extract(payload: unknown): ZecUsdPrice {
+    const data =
+      payload && typeof payload === 'object'
+        ? (payload as { data?: { amount?: unknown; base?: unknown; currency?: unknown } }).data
+        : undefined;
+    if (!data || typeof data !== 'object') {
+      throw new PriceUnavailableError('price provider response did not contain ZEC', 'bad_response');
+    }
+    if (data.base !== 'ZEC' || data.currency !== 'USD') {
+      throw new PriceUnavailableError('price provider response was not a ZEC/USD quote', 'bad_response');
+    }
+    return {
+      provider: this.name,
+      asset: 'ZEC',
+      quote: 'USD',
+      price: normalizePrice(data.amount),
+      // Coinbase's spot endpoint carries no timestamp; the moment we fetched it
+      // is the observation time. Never invented, just recorded.
+      observedAt: new Date(this.now()).toISOString(),
+    };
+  }
+}
+
+/**
+ * Tries each provider in order and returns the first live observation. Providers
+ * are independent live sources, not fallback values: a hard failure in one is
+ * retried against the next, and if all fail the last error is thrown. No price
+ * is ever invented. Used by the `auto` provider so a keyless deployment stays
+ * working even when one public source rate-limits the host.
+ */
+export class ChainedPriceProvider implements ZecUsdPriceProvider {
+  readonly name: string;
+
+  constructor(
+    private readonly providers: ZecUsdPriceProvider[],
+    name = 'auto',
+  ) {
+    this.name = name;
+  }
+
+  async getZecUsdPrice(): Promise<ZecUsdPrice> {
+    let lastError: unknown;
+    for (const provider of this.providers) {
+      try {
+        return await provider.getZecUsdPrice();
+      } catch (err) {
+        lastError = err;
+      }
+    }
+    throw lastError instanceof Error
+      ? lastError
+      : new PriceUnavailableError('no live price provider succeeded', 'provider_error');
+  }
+}
+
 export interface PriceConfig {
-  BLINK_PRICE_PROVIDER: 'none' | 'coinmarketcap' | 'coingecko';
+  BLINK_PRICE_PROVIDER: 'none' | 'coinmarketcap' | 'coingecko' | 'coinbase' | 'auto';
   COINMARKETCAP_API_KEY: string;
   BLINK_PRICE_CACHE_TTL_MS: number;
   BLINK_PRICE_TIMEOUT_MS: number;
@@ -267,11 +341,20 @@ export function createZecUsdPriceProvider(
     timeoutMs: config.BLINK_PRICE_TIMEOUT_MS,
     ...overrides,
   };
-  if (config.BLINK_PRICE_PROVIDER === 'coinmarketcap') {
-    return new CoinMarketCapPriceProvider({ apiKey: config.COINMARKETCAP_API_KEY, ...shared });
+  switch (config.BLINK_PRICE_PROVIDER) {
+    case 'coinmarketcap':
+      return new CoinMarketCapPriceProvider({ apiKey: config.COINMARKETCAP_API_KEY, ...shared });
+    case 'coingecko':
+      return new CoinGeckoPriceProvider(shared);
+    case 'coinbase':
+      return new CoinbasePriceProvider(shared);
+    case 'auto':
+      // Coinbase first (generous limits), CoinGecko as a second live source.
+      return new ChainedPriceProvider([
+        new CoinbasePriceProvider(shared),
+        new CoinGeckoPriceProvider(shared),
+      ]);
+    default:
+      return new DisabledPriceProvider();
   }
-  if (config.BLINK_PRICE_PROVIDER === 'coingecko') {
-    return new CoinGeckoPriceProvider(shared);
-  }
-  return new DisabledPriceProvider();
 }
