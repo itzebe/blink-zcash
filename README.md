@@ -277,7 +277,7 @@ All configuration is via the environment; nothing is hard-coded. See
 | `BLINK_VERIFICATION_PROVIDER` | `none` (default), `node-rpc`, or `lightwalletd` |
 | `BLINK_LIGHTWALLETD_URL` | lightwalletd gRPC endpoint; required when the provider is `lightwalletd` |
 | `BLINK_CONFIRMATIONS_REQUIRED` | confirmations before a payment reads `CONFIRMED` (default `1`) |
-| `BLINK_PRICE_PROVIDER` | `coinmarketcap`, `coinbase`, `coingecko`, `auto`, or `none`; enables USD-denominated requests. When unset or blank, auto-selects CoinMarketCap if `COINMARKETCAP_API_KEY` is present, else the keyless `auto` chain (Coinbase, then CoinGecko). `auto` is a resilient chain that tries CoinMarketCap first when the key is present, then the keyless sources. `coinmarketcap` requires the key or the API refuses to start |
+| `BLINK_PRICE_PROVIDER` | `coinmarketcap`, `coinbase`, `coingecko`, `auto`, or `none`; enables USD-denominated requests. When unset or blank, auto-selects CoinMarketCap if `COINMARKETCAP_API_KEY` is present, else the keyless `auto` chain (Coinbase, then CoinGecko). `auto` is a resilient chain that tries CoinMarketCap first when the key is present, then the keyless sources. In production, `coinmarketcap` with no key degrades to `none` (USD requests return 503) rather than taking the API down; outside production it is a startup error |
 | `COINMARKETCAP_API_KEY` | server-side key for the live ZEC/USD rate when the provider is `coinmarketcap`, or preferred inside `auto` (never exposed to the browser) |
 | `BLINK_PRICE_CACHE_TTL_MS` / `BLINK_PRICE_TIMEOUT_MS` | price cache window and request timeout (ms) |
 | `ZCASH_RPC_URL` / `ZCASH_RPC_USER` / `ZCASH_RPC_PASSWORD` | full-node RPC, if used |
