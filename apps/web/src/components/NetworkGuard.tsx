@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 
 /**
  * Fail-closed network guard.
@@ -15,25 +15,37 @@ import { useEffect, useState } from 'react';
  *  - a mismatch renders the block screen and no app content;
  *  - if the network cannot be determined at all, the app is blocked rather than
  *    allowed to run unverified.
+ *
+ * A short bounded retry absorbs transient failures (a Render free instance cold
+ * starting, a dropped request) so the guard does not block a healthy app; after
+ * the retries are exhausted the block screen offers a manual retry.
  */
 const BUILD_NETWORK = (process.env.NEXT_PUBLIC_NETWORK ?? '') as '' | 'testnet' | 'mainnet';
+const ATTEMPTS = 4;
+const RETRY_DELAY_MS = 1500;
 
 type State =
   | { kind: 'checking' }
   | { kind: 'ok' }
   | { kind: 'blocked'; reason: string; apiNetwork?: string };
 
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
 export function NetworkGuard({ children }: { children: React.ReactNode }) {
   const [state, setState] = useState<State>({ kind: 'checking' });
+  const runIdRef = useRef(0);
 
-  useEffect(() => {
-    let cancelled = false;
-    (async () => {
+  const check = useCallback(async () => {
+    const runId = ++runIdRef.current;
+    setState({ kind: 'checking' });
+    let lastError = 'unknown error';
+    for (let attempt = 0; attempt < ATTEMPTS; attempt++) {
       try {
         const res = await fetch('/v1/meta/network', { headers: { accept: 'application/json' } });
+        if (runId !== runIdRef.current) return;
         if (!res.ok) throw new Error(`network check failed (HTTP ${res.status})`);
         const { network } = (await res.json()) as { network: string };
-        if (cancelled) return;
+        if (runId !== runIdRef.current) return;
         if (BUILD_NETWORK && network !== BUILD_NETWORK) {
           setState({
             kind: 'blocked',
@@ -43,20 +55,19 @@ export function NetworkGuard({ children }: { children: React.ReactNode }) {
           return;
         }
         setState({ kind: 'ok' });
+        return;
       } catch (err) {
-        if (cancelled) return;
-        setState({
-          kind: 'blocked',
-          reason: `Could not confirm the Zcash network: ${
-            err instanceof Error ? err.message : 'unknown error'
-          }.`,
-        });
+        lastError = err instanceof Error ? err.message : 'unknown error';
+        if (attempt < ATTEMPTS - 1) await sleep(RETRY_DELAY_MS);
       }
-    })();
-    return () => {
-      cancelled = true;
-    };
+    }
+    if (runId !== runIdRef.current) return;
+    setState({ kind: 'blocked', reason: `Could not confirm the Zcash network: ${lastError}.` });
   }, []);
+
+  useEffect(() => {
+    void check();
+  }, [check]);
 
   if (state.kind === 'checking') {
     return (
@@ -81,6 +92,9 @@ export function NetworkGuard({ children }: { children: React.ReactNode }) {
             BLINK refuses to run when the frontend and backend disagree about the Zcash network, to
             avoid any chance of a payment being made on the wrong chain. No funds have been moved.
           </p>
+          <button type="button" className="btn btn--ghost" onClick={() => void check()}>
+            Retry
+          </button>
         </div>
       </main>
     );
