@@ -22,8 +22,6 @@ export interface RouteDeps {
   config: import('../config.js').AppConfig;
   /** Live ZEC/USD price source, when configured. Never exposes the API key. */
   priceProvider?: ZecUsdPriceProvider;
-  /** Resolve the caller's user id, if authenticated. */
-  resolveOwner?: (req: unknown) => Promise<string | null>;
 }
 
 const createSchema = z.object({
@@ -35,6 +33,11 @@ const createSchema = z.object({
    * convert; the resulting request is always settled in ZEC.
    */
   currency: z.enum(['ZEC', 'USD']).default('ZEC'),
+  /**
+   * Everyday workflow the request belongs to. Presentation metadata only; it
+   * never changes how the request settles. Defaults to `invoice`.
+   */
+  purpose: z.enum(['invoice', 'payroll', 'remittance', 'subscription', 'point_of_sale']).default('invoice'),
   memo: z.string().max(1000).nullish(),
   label: z.string().max(100).nullish(),
   message: z.string().max(500).nullish(),
@@ -97,8 +100,7 @@ export async function registerRoutes(app: FastifyInstance, deps: RouteDeps): Pro
       return reply.code(400).send({ error: 'invalid_request', issues: parsed.error.flatten() });
     }
     try {
-      const ownerId = deps.resolveOwner ? await deps.resolveOwner(req) : null;
-      const row = await service.create({ ...parsed.data, ownerId });
+      const row = await service.create({ ...parsed.data });
       let refererOrigin: string | null = null;
       if (req.headers.referer) {
         try {
@@ -241,16 +243,6 @@ export async function registerRoutes(app: FastifyInstance, deps: RouteDeps): Pro
     }
   });
 
-  /** Activity for the authenticated owner. */
-  app.get('/v1/activity', async (req, reply) => {
-    const ownerId = deps.resolveOwner ? await deps.resolveOwner(req) : null;
-    if (!ownerId) {
-      return reply.code(401).send({ error: 'unauthorized', message: 'sign in to view activity' });
-    }
-    const rows = await service.listForOwner(ownerId);
-    return reply.send({ requests: rows.map((r) => service.toPublic(r)) });
-  });
-
   /** Receipt / proof of payment. */
   app.get('/v1/payment-requests/:shortCode/receipt', async (req, reply) => {
     const { shortCode } = req.params as { shortCode: string };
@@ -273,6 +265,7 @@ export async function registerRoutes(app: FastifyInstance, deps: RouteDeps): Pro
         currency: 'ZEC',
         usdAmount: fresh.usdAmount,
         zecUsdPrice: fresh.zecUsdPrice,
+        purpose: fresh.purpose,
         memo: fresh.memo,
         network: fresh.network,
         privacy: service.privacyOf(fresh),

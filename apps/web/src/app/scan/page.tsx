@@ -210,10 +210,11 @@ export default function ScanPage() {
       <TopBar network={NETWORK} />
       <form className="stack" onSubmit={handleParse}>
         <div className="stack stack--sm" style={{ textAlign: 'center' }}>
-          <p className="kicker">SCAN BLINK</p>
-          <h1>Point your camera at a Blink payment QR</h1>
+          <p className="kicker">Check a payment request</p>
+          <h1>Scan or paste a BLINK request</h1>
           <p className="lede">
-            Or paste a Blink link or ZIP 321 payment request below. Nothing is paid until you confirm.
+            Scan a BLINK QR, or paste a BLINK link or ZIP 321 payment request. Nothing is paid until
+            you confirm.
           </p>
         </div>
 
@@ -257,7 +258,7 @@ export default function ScanPage() {
                 className="btn btn--primary btn--small"
                 onClick={startCameraScanner}
               >
-                📷 Start Camera Scan
+                Start camera
               </button>
             ) : null}
             <button
@@ -265,7 +266,7 @@ export default function ScanPage() {
               className="btn btn--ghost btn--small"
               onClick={() => fileInputRef.current?.click()}
             >
-              🖼 Choose Photo from Gallery
+              Choose photo
             </button>
             <input
               ref={fileInputRef}
@@ -286,7 +287,7 @@ export default function ScanPage() {
           <textarea
             id="payload"
             className="textarea input--mono"
-            placeholder={'https://blink-web.onrender.com/pay/8K4Q2X\nor zcash:u1…?amount=25&memo=…'}
+            placeholder={'https://blink-web-bgkz.onrender.com/pay/8K4Q2X\nor zcash:u1…?amount=25&memo=…'}
             spellCheck={false}
             autoComplete="off"
             value={input}

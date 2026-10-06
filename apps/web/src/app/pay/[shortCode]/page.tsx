@@ -6,7 +6,7 @@ import { Shell, TopBar, Alert, Row, StatusBadge } from '@/components/Shell';
 import { BlinkPaymentCard } from '@/components/BlinkPaymentCard';
 import { PrivacyPanel } from '@/components/PrivacyPanel';
 import { api, ApiError, type PaymentDetails, type PublicPaymentRequest } from '@/lib/api';
-import { statusLabel, statusTone, statusIsVerified } from '@/lib/status';
+import { statusLabel, statusTone, statusIsVerified, purposeLabel } from '@/lib/status';
 
 type Phase =
   | { name: 'loading' }
@@ -378,7 +378,7 @@ export default function PayPage({ params }: { params: Promise<{ shortCode: strin
       <TopBar network={network} />
       <div className="stack">
         <div className="stack stack--sm" style={{ textAlign: 'center' }}>
-          <p className="kicker">Private Payment Request</p>
+          <p className="kicker">{purposeLabel(request.purpose)}</p>
           <h1>{request.recipientName} requested a payment</h1>
         </div>
 

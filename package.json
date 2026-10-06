@@ -15,31 +15,37 @@
     "build": "npm run build -w @blink/shared -w @blink/zcash -w @blink/payment-request && npm run build -w @blink/api && npm run build -w @blink/web",
     "build:packages": "npm run build -w @blink/shared -w @blink/zcash -w @blink/payment-request",
     "dev": "concurrently -n api,web -c blue,magenta \"npm run dev -w @blink/api\" \"npm run dev -w @blink/web\"",
-    "test": "npm run test:packages && npm run test:api",
+    "test": "npm run test:packages && npm run test:api && npm run test:web",
     "test:packages": "npm run test -w @blink/shared -w @blink/zcash -w @blink/payment-request",
     "test:api": "npm run test -w @blink/api",
+    "test:web": "npm run test -w @blink/web",
     "test:rust": "cd crates/blink-zcash && cargo test",
     "test:e2e": "playwright test",
     "lint": "eslint .",
     "typecheck": "npm run typecheck --workspaces --if-present",
     "db:migrate": "npm run db:migrate -w @blink/api",
-    "db:seed": "npm run db:seed -w @blink/api",
     "format": "prettier --write \"**/*.{ts,tsx,js,json,md}\""
   },
   "dependencies": {
     "typescript": "5.8.2"
   },
+  "overrides": {
+    "shell-quote": "^1.12.0",
+    "next": {
+      "postcss": "^8.5.29"
+    }
+  },
   "devDependencies": {
     "@eslint/js": "^9.15.0",
     "@playwright/test": "^1.48.0",
     "@types/node": "^22.7.5",
-    "@typescript-eslint/eslint-plugin": "8.15.0",
-    "@typescript-eslint/parser": "8.15.0",
-    "concurrently": "^9.0.1",
+    "@typescript-eslint/eslint-plugin": "^8.71.1",
+    "@typescript-eslint/parser": "^8.71.1",
+    "concurrently": "^10.0.5",
     "eslint": "^9.39.5",
     "prettier": "^3.3.3",
-    "typescript-eslint": "^8.15.0",
-    "vitest": "^2.1.3",
+    "typescript-eslint": "^8.71.1",
+    "vitest": "^4.1.11",
     "wait-on": "^8.0.1"
   }
 }

@@ -384,6 +384,13 @@ h2 {
   gap: 4px;
 }
 
+/* A wrapping variant for option sets with longer labels (e.g. Purpose). */
+.segmented--wrap {
+  grid-auto-flow: row;
+  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+  gap: 4px;
+}
+
 .segmented--sm label {
   padding: 5px 14px;
   font-size: 12px;

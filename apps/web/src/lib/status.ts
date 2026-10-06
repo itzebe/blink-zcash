@@ -1,4 +1,5 @@
-import type { PaymentStatus } from '@blink/shared';
+import type { PaymentStatus, PaymentPurpose } from '@blink/shared';
+import { PAYMENT_PURPOSE_LABELS } from '@blink/shared';
 
 export type StatusTone = 'neutral' | 'waiting' | 'progress' | 'ok' | 'bad';
 
@@ -45,4 +46,9 @@ export function statusLabel(status: string): string {
  */
 export function statusIsVerified(status: string): boolean {
   return status === 'CONFIRMED' || status === 'CONFIRMING';
+}
+
+/** Human-facing label for a payment purpose, e.g. `payroll` -> "Private payroll". */
+export function purposeLabel(purpose: string): string {
+  return PAYMENT_PURPOSE_LABELS[purpose as PaymentPurpose] ?? 'Private invoice';
 }

@@ -106,6 +106,12 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
   const isProduction = parsed.NODE_ENV === 'production';
 
   if (isProduction) {
+    // A production process must never silently fall back to the localhost
+    // development default; that would point a live deployment at a database that
+    // does not exist (or, worse, a local one). Require an explicit DATABASE_URL.
+    if (!env.DATABASE_URL || env.DATABASE_URL.trim() === '') {
+      throw new Error('DATABASE_URL is required in production');
+    }
     if (!parsed.BLINK_ENCRYPTION_KEY || !/^[0-9a-fA-F]{64}$/.test(parsed.BLINK_ENCRYPTION_KEY)) {
       throw new Error(
         'BLINK_ENCRYPTION_KEY must be a 32-byte hex string in production (64 hex chars)',

@@ -191,6 +191,116 @@ describe('POST /v1/payment-requests', () => {
   });
 });
 
+describe('payment purpose (everyday workflow label)', () => {
+  it('defaults to invoice and echoes the purpose in the public projection', async () => {
+    const { status, body } = await create();
+    expect(status).toBe(201);
+    expect(body.request.purpose).toBe('invoice');
+  });
+
+  it('persists an explicit purpose', async () => {
+    for (const purpose of ['payroll', 'remittance', 'subscription', 'point_of_sale'] as const) {
+      const { status, body } = await create({ purpose });
+      expect(status).toBe(201);
+      expect(body.request.purpose).toBe(purpose);
+    }
+  });
+
+  it('rejects an unknown purpose rather than coercing it', async () => {
+    const { status } = await create({ purpose: 'charity' });
+    expect(status).toBe(400);
+  });
+
+  it('carries the purpose through to the receipt', async () => {
+    const { body } = await create({ purpose: 'payroll' });
+    const code = body.shortCode;
+    const txid = 'a'.repeat(64);
+    await built.app.inject({
+      method: 'POST',
+      url: `/v1/payment-requests/${code}/transactions`,
+      payload: { txid },
+    });
+    provider.next = { txid, confirmations: 3, broadcast: true, source: 'stub' };
+    await built.app.inject({
+      method: 'POST',
+      url: `/v1/payment-requests/${code}/verify`,
+      payload: {},
+    });
+    const receipt = await built.app.inject({ url: `/v1/payment-requests/${code}/receipt` });
+    expect(receipt.statusCode).toBe(200);
+    expect(receipt.json().receipt.purpose).toBe('payroll');
+  });
+});
+
+describe('the price-provider key is never exposed', () => {
+  // A recognisable sentinel: if it ever reaches a response body, this fails.
+  const KEY = 'cmc_sentinel_key_do_not_leak_0001';
+
+  it('never returns the CoinMarketCap key from /health or a price lookup', async () => {
+    const config = loadConfig({ ...baseEnv, COINMARKETCAP_API_KEY: KEY });
+    const app = await buildApp({ config, provider: new StubProvider(), priceProvider });
+    await app.app.ready();
+    try {
+      const health = await app.app.inject({ url: '/health' });
+      const price = await app.app.inject({ url: '/v1/price/zec-usd' });
+      for (const res of [health, price]) {
+        expect(res.body).not.toContain(KEY);
+      }
+      // The presence-only diagnostic still reports that a key is configured.
+      expect(health.json().priceKeyConfigured).toBe(true);
+    } finally {
+      await app.app.close();
+    }
+  });
+
+  it('never returns the key from a created request, its public view, or its receipt', async () => {
+    const config = loadConfig({ ...baseEnv, COINMARKETCAP_API_KEY: KEY });
+    const stub = new StubProvider();
+    const app = await buildApp({ config, provider: stub, priceProvider });
+    await app.app.ready();
+    try {
+      const created = await app.app.inject({
+        method: 'POST',
+        url: '/v1/payment-requests',
+        payload: {
+          recipientName: 'Joseph',
+          recipientAddress: TEST_SAPLING,
+          amount: '25',
+          currency: 'USD',
+          expiryMinutes: 30,
+        },
+      });
+      expect(created.statusCode).toBe(201);
+      const code = created.json().shortCode;
+
+      const txid = 'b'.repeat(64);
+      await app.app.inject({
+        method: 'POST',
+        url: `/v1/payment-requests/${code}/transactions`,
+        payload: { txid },
+      });
+      stub.next = { txid, confirmations: 3, broadcast: true, source: 'stub' };
+      await app.app.inject({
+        method: 'POST',
+        url: `/v1/payment-requests/${code}/verify`,
+        payload: {},
+      });
+
+      const views = await Promise.all([
+        app.app.inject({ url: `/v1/payment-requests/${code}` }),
+        app.app.inject({ url: `/v1/payment-requests/${code}/payment-details` }),
+        app.app.inject({ url: `/v1/payment-requests/${code}/receipt` }),
+      ]);
+      expect(views[2].statusCode).toBe(200);
+      for (const res of [created, ...views]) {
+        expect(res.body).not.toContain(KEY);
+      }
+    } finally {
+      await app.app.close();
+    }
+  });
+});
+
 describe('USD-denominated payment requests', () => {
   async function createUsd(overrides: Record<string, unknown> = {}) {
     const res = await built.app.inject({

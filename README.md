@@ -113,24 +113,31 @@ provides, and shows that classification to both parties. It is derived from the
 address kind by the authoritative Rust engine and is never inferred from
 anything else:
 
-| Recipient address | Recipient | Amount | Sender |
-| --- | --- | --- | --- |
-| Unified (`u1…`) / Sapling (`zs1…`) | Protected | Protected | Depends on the payer |
-| Transparent (`t1…` / `t3…`) | Public | Public | Public |
+| Recipient address | Recipient | Amount | Sender | Memo |
+| --- | --- | --- | --- | --- |
+| Unified (`u1…`) / Sapling (`zs1…`) | Protected | Protected | Depends on the payer | Plaintext |
+| Transparent (`t1…` / `t3…`) | Public | Public | Public | n/a (not allowed) |
 
 The sender row is deliberately "Depends on the payer": BLINK cannot know which
 pool the payer will spend from, and a payer using a transparent address is
-visible on-chain. BLINK therefore never labels a payment "anonymous" and never
-claims a transparent route is shielded. A transparent recipient is shown as
-**fully public** with a warning, because that is what it is.
+visible on-chain. The memo row is "Plaintext" because BLINK stores, displays and
+encodes the memo in the clear — only the recipient *address* is encrypted at
+rest, and the memo is never described as confidential. BLINK therefore never
+labels a payment "anonymous" and never claims a transparent route is shielded. A
+transparent recipient is shown as **fully public** with a warning, because that
+is what it is.
 
-### Shielded use cases
+### Everyday workflows: private invoices, payroll, remittance
 
-The Zecathon Shielded Payments track is about putting shielded Zcash to work.
-BLINK ships these as presets over the **one** request flow (a mode only
-pre-fills the same form; there is no separate mini-app and no fabricated
-transaction):
+BLINK ships one request flow with an optional **purpose** label — a private
+invoice, payroll, remittance, subscription or point of sale. The purpose is
+presentation metadata: it frames the request in the recipient's and payer's UI
+and is stored on the request, but it never changes how the request settles.
+Every request is the same standards-compliant ZIP 321 payment in ZEC, and BLINK
+never fabricates a transaction for a "use case":
 
+- **Private invoice** — the default. A request with a memo, a shareable link and
+  an address that never appears in the link.
 - **Point of sale** — a short-expiry request a merchant can show as a QR code.
 - **Payroll** — a long-expiry request a business sends to each team member.
 - **Remittance** — a payment link shared in a chat, with the recipient address
@@ -228,8 +235,7 @@ Repository layout:
 ├── packages/
 │   ├── payment-request/      # ZIP 321 URI builder + parser
 │   ├── zcash/                # Address parsing + validation
-│   ├── shared/               # Types, money math, status state machine
-│   └── ui/                   # Shared presentational components
+│   └── shared/               # Types, money math, status state machine, privacy model
 ├── crates/
 │   └── blink-zcash/          # Authoritative Rust engine (official Zcash crates)
 ├── tests/
@@ -264,7 +270,7 @@ All configuration is via the environment; nothing is hard-coded. See
 | --- | --- |
 | `ZCASH_NETWORK` | `testnet` (default) or `mainnet` |
 | `NEXT_PUBLIC_NETWORK` | must match `ZCASH_NETWORK` |
-| `DATABASE_URL` | PostgreSQL connection string |
+| `DATABASE_URL` | PostgreSQL connection string. Required in production; the API refuses to start without it rather than fall back to the localhost default |
 | `APP_BASE_URL` | public web base for share links |
 | `BLINK_ENCRYPTION_KEY` | 32-byte hex; encrypts addresses at rest; required in production |
 | `BLINK_ZCASH_SERVICE_URL` | URL of the Rust engine |
@@ -478,16 +484,19 @@ Full detail: [`SECURITY.md`](SECURITY.md) and
 
 ## 18. Proof of payment, honestly
 
-BLINK offers **PROVE PAYMENT** as a receipt, but it does not claim selective
-disclosure it has not implemented. A receipt states, plainly:
+When a request reaches `CONFIRMED`, BLINK issues a **Private payment receipt**.
+The receipt does not claim selective disclosure it has not implemented; it
+states, plainly:
 
 > "This receipt confirms that BLINK observed a confirmed Zcash transaction
 > associated with this payment request. BLINK cannot cryptographically prove the
 > sender, recipient or amount of a shielded transaction; those details are
 > private to the parties involved."
 
-If a real Zcash payment-disclosure mechanism is implemented later (e.g. per the
-relevant ZIP), the documentation will say exactly what is disclosed.
+A receipt is issued only for a `CONFIRMED` request; a claimed txid that was never
+observed yields no receipt. If a real Zcash payment-disclosure mechanism is
+implemented later (e.g. per the relevant ZIP), the documentation will say exactly
+what is disclosed.
 
 ## 19. Roadmap
 

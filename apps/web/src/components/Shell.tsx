@@ -26,11 +26,11 @@ export function TopBar({ network, right }: { network: 'testnet' | 'mainnet'; rig
       </Link>
       <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
         <Link
-          href="/activity"
+          href="/scan"
           className="btn btn--ghost btn--small"
           style={{ padding: '6px 12px', minHeight: 32, fontSize: 12, borderRadius: 999 }}
         >
-          Activity
+          Check a request
         </Link>
         {right ?? <NetworkPill network={network} />}
       </div>
