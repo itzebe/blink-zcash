@@ -306,6 +306,12 @@ h2 {
   font-weight: 600;
 }
 
+.payment-card__amount-sub {
+  margin-top: 8px;
+  font-size: 13px;
+  color: var(--muted);
+}
+
 .payment-card__memo {
   background: var(--surface-2);
   border: 1px solid var(--border);
@@ -362,6 +368,27 @@ h2 {
   letter-spacing: 0.18em;
   text-transform: uppercase;
   color: var(--muted);
+}
+
+.field__label-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 8px;
+}
+
+.segmented--sm {
+  grid-auto-columns: auto;
+  padding: 3px;
+  gap: 4px;
+}
+
+.segmented--sm label {
+  padding: 5px 14px;
+  font-size: 12px;
+  font-family: var(--font-mono);
+  letter-spacing: 0.08em;
 }
 
 .input,

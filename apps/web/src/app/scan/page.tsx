@@ -307,6 +307,9 @@ export default function ScanPage() {
               {result.amount ?? '—'}
               <span>ZEC</span>
             </h2>
+            <p className="tiny muted" style={{ marginTop: 4 }}>
+              ZIP 321 amounts are ZEC. A raw request carries no USD value, so none is shown.
+            </p>
             <div style={{ marginTop: 12 }}>
               {result.label ? <Row label="Label">{result.label}</Row> : null}
               {result.memo ? <Row label="Memo">{result.memo}</Row> : null}

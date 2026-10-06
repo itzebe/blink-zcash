@@ -27,6 +27,8 @@ test.describe('BLINK core flow', () => {
   test('recipient creates a request and receives a share link and QR code', async ({ page }) => {
     await page.goto('/request');
 
+    // Native ZEC request: deterministic, needs no live price provider.
+    await page.locator('label[for="currency-ZEC"]').click();
     await page.getByLabel('Amount').fill('25.00');
     await page.getByLabel('Memo (optional)').fill('Dinner');
     await page.getByLabel('Your name').fill('Joseph');

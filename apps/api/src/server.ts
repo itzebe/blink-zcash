@@ -17,6 +17,7 @@ import {
   createVerificationProvider,
   type VerificationProvider,
 } from './services/verification-provider.js';
+import { createZecUsdPriceProvider, type ZecUsdPriceProvider } from './services/price-service.js';
 import { registerRoutes, type RouteDeps } from './routes/index.js';
 
 export interface BuildAppOptions {
@@ -25,6 +26,7 @@ export interface BuildAppOptions {
   crypto?: Crypto;
   engine?: ZcashEngine;
   provider?: VerificationProvider;
+  priceProvider?: ZecUsdPriceProvider;
   now?: () => Date;
   generateCode?: () => string;
 }
@@ -55,11 +57,21 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<BuiltApp>
       engine,
     });
 
+  const priceProvider =
+    options.priceProvider ??
+    createZecUsdPriceProvider({
+      BLINK_PRICE_PROVIDER: config.BLINK_PRICE_PROVIDER,
+      COINMARKETCAP_API_KEY: config.COINMARKETCAP_API_KEY,
+      BLINK_PRICE_CACHE_TTL_MS: config.BLINK_PRICE_CACHE_TTL_MS,
+      BLINK_PRICE_TIMEOUT_MS: config.BLINK_PRICE_TIMEOUT_MS,
+    });
+
   const service = new PaymentService({
     db,
     crypto,
     engine,
     provider,
+    priceProvider,
     network: config.ZCASH_NETWORK,
     confirmationsRequired: config.BLINK_CONFIRMATIONS_REQUIRED,
     ...(options.now ? { now: options.now } : {}),
@@ -90,7 +102,7 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<BuiltApp>
     timeWindow: config.BLINK_RATE_LIMIT_WINDOW_MS,
   });
 
-  const deps: RouteDeps = { service, config };
+  const deps: RouteDeps = { service, config, priceProvider };
   await registerRoutes(app, deps);
 
   app.setErrorHandler((err: Error, _req, reply) => {

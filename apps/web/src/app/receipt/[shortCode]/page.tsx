@@ -43,8 +43,14 @@ export default function ReceiptPage({ params }: { params: Promise<{ shortCode: s
             <div className="card card--accent">
               <h2 className="amount-hero" style={{ fontSize: 44 }}>
                 {receipt.amount}
-                <span>{receipt.currency}</span>
+                <span>ZEC</span>
               </h2>
+              {receipt.usdAmount ? (
+                <p className="tiny muted" style={{ marginTop: 4 }}>
+                  Requested ${receipt.usdAmount} USD · converted at 1 ZEC = ${receipt.zecUsdPrice}{' '}
+                  USD
+                </p>
+              ) : null}
               <div style={{ marginTop: 14 }}>
                 <Row label="Status">{receipt.status}</Row>
                 <Row label="Network">

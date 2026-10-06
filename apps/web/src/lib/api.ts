@@ -10,8 +10,16 @@
 export interface PublicPaymentRequest {
   shortCode: string;
   recipientName: string;
+  /** Settlement amount in ZEC (the value ZIP 321 carries). */
   amount: string;
+  /** Always "ZEC": ZIP 321 amounts are ZEC-denominated. */
   currency: 'ZEC';
+  /** Original requested amount in USD, or null for a native ZEC request. */
+  usdAmount: string | null;
+  /** ZEC/USD price used at creation, or null for a native ZEC request. */
+  zecUsdPrice: string | null;
+  priceProvider: string | null;
+  priceObservedAt: string | null;
   memo: string | null;
   network: 'testnet' | 'mainnet';
   status: string;
@@ -19,6 +27,15 @@ export interface PublicPaymentRequest {
   txidShort: string | null;
   expiresAt: string;
   createdAt: string;
+}
+
+/** Normalized ZEC/USD price returned by the API (never contains the API key). */
+export interface ZecUsdPrice {
+  provider: string;
+  asset: 'ZEC';
+  quote: 'USD';
+  price: string;
+  observedAt: string | null;
 }
 
 export interface CreatedPaymentRequest {
@@ -84,7 +101,13 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 export interface CreateInput {
   recipientName: string;
   recipientAddress: string;
+  /**
+   * Requested amount. Interpreted according to `currency`: a ZEC decimal string
+   * for `'ZEC'` (default), or a USD decimal string for `'USD'` — in which case
+   * the server converts it to ZEC at a live price.
+   */
   amount: string;
+  currency?: 'ZEC' | 'USD';
   memo?: string;
   expiryMinutes: number;
 }
@@ -95,6 +118,11 @@ export const api = {
       method: 'POST',
       body: JSON.stringify(input),
     });
+  },
+
+  /** Current ZEC/USD price for the Request screen preview. */
+  getZecUsdPrice(): Promise<{ price: ZecUsdPrice }> {
+    return request<{ price: ZecUsdPrice }>('/v1/price/zec-usd');
   },
 
   getPaymentRequest(shortCode: string): Promise<{ request: PublicPaymentRequest }> {
@@ -148,6 +176,10 @@ export interface Receipt {
   shortCode: string;
   amount: string;
   currency: string;
+  /** Original requested amount in USD, or null for a native ZEC request. */
+  usdAmount: string | null;
+  /** ZEC/USD price used at creation, or null for a native ZEC request. */
+  zecUsdPrice: string | null;
   memo: string | null;
   network: string;
   status: string;
