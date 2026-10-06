@@ -139,15 +139,20 @@ ZIP 321 carries: the standard requires `amount` in ZEC, so the API converts USD
 to ZEC server-side at a live rate and the URI/QR always encode the ZEC amount.
 
 - The conversion uses exact integer math (`packages/shared/src/money.ts`), never
-  floating point.
+  floating point. Because USD rarely maps to a whole number of zatoshis, the
+  exact quotient is rounded **up** to the next zatoshi: the payer is asked for
+  at least the USD-equivalent value, and the over-ask is under 1 zatoshi
+  (1e-8 ZEC). It is never rounded down and never collapses to the raw USD
+  figure.
 - The live rate comes from a configurable price source (`BLINK_PRICE_PROVIDER`).
-  With `BLINK_PRICE_PROVIDER=none`, USD requests are refused and ZEC requests
-  still work.
+  When it is unset the API auto-selects: CoinMarketCap if `COINMARKETCAP_API_KEY`
+  is set, otherwise the keyless CoinGecko source. `none` refuses USD requests
+  while ZEC requests keep working.
 - The original request is snapshotted: `usd_amount`, `zec_usd_price` and
   `price_provider` are stored alongside the ZEC `amount`, so a later market move
   cannot change an already-created request. The payer sees both figures.
-- A USD amount that does not map to whole zatoshis, or a rate that is
-  unavailable, invalid or zero, fails safely with an explicit error. A failed
+- A rate that is unavailable, invalid or zero fails safely with an explicit
+  error. A failed
   conversion never falls through as a ZEC amount.
 - The price provider's API key is **server-side only**; it is never sent to the
   browser and never returned by the API.
@@ -224,8 +229,8 @@ All configuration is via the environment; nothing is hard-coded. See
 | `BLINK_VERIFICATION_PROVIDER` | `none` (default), `node-rpc`, or `lightwalletd` |
 | `BLINK_LIGHTWALLETD_URL` | lightwalletd gRPC endpoint; required when the provider is `lightwalletd` |
 | `BLINK_CONFIRMATIONS_REQUIRED` | confirmations before a payment reads `CONFIRMED` (default `1`) |
-| `BLINK_PRICE_PROVIDER` | `none` (default) or `coinmarketcap`; enables USD-denominated requests. `coinmarketcap` requires `COINMARKETCAP_API_KEY` or the API refuses to start |
-| `COINMARKETCAP_API_KEY` | server-side key for the live ZEC/USD rate (never exposed to the browser) |
+| `BLINK_PRICE_PROVIDER` | `coinmarketcap`, `coingecko`, or `none`; enables USD-denominated requests. When unset, auto-selects CoinMarketCap if `COINMARKETCAP_API_KEY` is present, else the keyless CoinGecko source. `coinmarketcap` requires the key or the API refuses to start |
+| `COINMARKETCAP_API_KEY` | server-side key for the live ZEC/USD rate when the provider is `coinmarketcap` (never exposed to the browser) |
 | `BLINK_PRICE_CACHE_TTL_MS` / `BLINK_PRICE_TIMEOUT_MS` | price cache window and request timeout (ms) |
 | `ZCASH_RPC_URL` / `ZCASH_RPC_USER` / `ZCASH_RPC_PASSWORD` | full-node RPC, if used |
 | `NEXT_PUBLIC_API_BASE_URL` | API base for the web app. When unset, the web app calls `/v1/*` same-origin and Next.js rewrites to `API_BASE_URL` |
@@ -394,12 +399,14 @@ Full detail: [`SECURITY.md`](SECURITY.md) and
 - **Testnet only.** Mainnet requires explicit operator configuration and a
   working verification provider.
 - **USD requests need a live price source.** A request may be denominated in USD,
-  but ZIP 321 carries ZEC, so the API converts at a live rate. With
-  `BLINK_PRICE_PROVIDER=none` (the default) USD requests are refused with a 503
-  and only native ZEC requests work; the deployed demo therefore runs ZEC-only.
-  Enabling USD requires `coinmarketcap` plus a server-side key. The rate is
-  snapshotted at creation, so the ZEC figure the payer sees does not track later
-  market moves.
+  but ZIP 321 carries ZEC, so the API converts at a live rate. When
+  `BLINK_PRICE_PROVIDER` is unset, the API auto-selects CoinMarketCap if
+  `COINMARKETCAP_API_KEY` is configured, otherwise the keyless CoinGecko source,
+  so USD requests work on the deployed demo without a key. If an operator sets
+  `BLINK_PRICE_PROVIDER=none`, USD requests are refused with a 503 and only
+  native ZEC requests work. The rate is snapshotted at creation, so the ZEC
+  figure the payer sees does not track later market moves. A failed price lookup
+  is always an explicit error, never a fabricated rate.
 - **Engine must understand the current consensus branch.** The Rust engine
   decodes a returned transaction to bind its bytes to the claimed txid. Its
   Zcash dependency must be new enough to parse the transaction version the

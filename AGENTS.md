@@ -95,11 +95,14 @@ Rust checks used in CI: `cargo fmt --all -- --check`,
   `amount` is always ZEC. The API converts server-side with exact BigInt math
   (`packages/shared/src/money.ts`, `convertUsdToZec`) and snapshots
   `usd_amount` / `zec_usd_price` / `price_provider` on the row so a later market
-  move cannot change a created request. The live rate comes from
-  `BLINK_PRICE_PROVIDER` (`none` default; `coinmarketcap` needs
-  `COINMARKETCAP_API_KEY`, server-side only, never returned by the API). With
-  `none`, USD requests fail 503 and ZEC requests still work. Never let a failed
-  conversion fall through as a ZEC amount.
+  move cannot change a created request. USD rarely maps to a whole zatoshi, so
+  `settledZecAmount` rounds UP to the next zatoshi (over-ask < 1 zatoshi); both
+  the API and the web preview call it, so they always agree. The live rate comes
+  from `BLINK_PRICE_PROVIDER` (auto-selected: `coinmarketcap` when
+  `COINMARKETCAP_API_KEY` is set, else keyless `coingecko`; `none` disables USD
+  with a 503 while ZEC still works; `coinmarketcap` needs
+  `COINMARKETCAP_API_KEY`, server-side only, never returned by the API). Never
+  let a failed conversion fall through as a ZEC amount.
 
 ## Repo
 

@@ -111,13 +111,12 @@ services:
       - key: BLINK_CONFIRMATIONS_REQUIRED
         value: "1"
       # Live ZEC/USD price for USD-denominated requests. ZIP 321 always carries
-      # the converted ZEC amount; the key stays server-side (never NEXT_PUBLIC_).
-      # Default `none` keeps deploys bootable: USD requests return 503 and ZEC
-      # requests still work. To enable USD requests, set this to
-      # `coinmarketcap` AND set COINMARKETCAP_API_KEY in the Render Dashboard
-      # (the API refuses to start with one but not the other).
-      - key: BLINK_PRICE_PROVIDER
-        value: none
+      # the converted ZEC amount. Leave BLINK_PRICE_PROVIDER unset to auto-select:
+      # CoinMarketCap when COINMARKETCAP_API_KEY is present (see below), else the
+      # keyless CoinGecko source. Set it to `none` to disable USD requests (they
+      # return 503) while ZEC requests keep working.
+      # - key: BLINK_PRICE_PROVIDER
+      #   value: none
       - key: BLINK_PRICE_CACHE_TTL_MS
         value: "60000"
       - key: BLINK_PRICE_TIMEOUT_MS

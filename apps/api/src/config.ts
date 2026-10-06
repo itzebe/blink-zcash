@@ -46,9 +46,18 @@ const schema = z.object({
 
   /**
    * Live ZEC/USD price source used to convert USD-denominated requests into the
-   * ZEC amount that ZIP 321 carries. `none` disables USD requests.
+   * ZEC amount that ZIP 321 carries.
+   *
+   *   coinmarketcap -> live ZEC/USD from CoinMarketCap (requires the key below).
+   *   coingecko     -> live ZEC/USD from CoinGecko (keyless).
+   *   none          -> USD requests are refused; ZEC requests still work.
+   *
+   * When unset, the provider is auto-selected: CoinMarketCap if an API key is
+   * present (so a deployment that provisions the key uses it), otherwise the
+   * keyless CoinGecko source. Either way the rate is a real live observation,
+   * never a fabricated fallback.
    */
-  BLINK_PRICE_PROVIDER: z.enum(['none', 'coinmarketcap']).default('none'),
+  BLINK_PRICE_PROVIDER: z.enum(['none', 'coinmarketcap', 'coingecko']).optional(),
   /** CoinMarketCap API key. Server-side only; never exposed to the browser. */
   COINMARKETCAP_API_KEY: z.string().optional().default(''),
   BLINK_PRICE_CACHE_TTL_MS: z.coerce.number().int().min(0).default(60_000),
@@ -62,6 +71,8 @@ const schema = z.object({
 export type AppConfig = z.infer<typeof schema> & {
   allowedOrigins: string[];
   isProduction: boolean;
+  /** Always resolved by {@link loadConfig} (auto-selected when unset). */
+  BLINK_PRICE_PROVIDER: 'none' | 'coinmarketcap' | 'coingecko';
 };
 
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
@@ -98,15 +109,20 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     throw new Error('BLINK_VERIFICATION_PROVIDER=node-rpc requires ZCASH_RPC_URL');
   }
 
-  // USD-denominated requests need a live price source. If the operator selects
-  // CoinMarketCap, the key must be present or every USD request would fail at
-  // runtime; refuse at startup so the misconfiguration is obvious.
-  if (parsed.BLINK_PRICE_PROVIDER === 'coinmarketcap' && !parsed.COINMARKETCAP_API_KEY) {
+  // USD-denominated requests need a live price source. Auto-select CoinMarketCap
+  // when a key is present, otherwise the keyless CoinGecko source. If the
+  // operator explicitly selects CoinMarketCap, the key must be present or every
+  // USD request would fail at runtime; refuse at startup so it is obvious.
+  const priceProvider =
+    parsed.BLINK_PRICE_PROVIDER ??
+    (parsed.COINMARKETCAP_API_KEY ? 'coinmarketcap' : 'coingecko');
+  if (priceProvider === 'coinmarketcap' && !parsed.COINMARKETCAP_API_KEY) {
     throw new Error('BLINK_PRICE_PROVIDER=coinmarketcap requires COINMARKETCAP_API_KEY');
   }
 
   return {
     ...parsed,
+    BLINK_PRICE_PROVIDER: priceProvider,
     isProduction,
     allowedOrigins: parsed.BLINK_ALLOWED_ORIGINS.split(',')
       .map((s) => s.trim())
