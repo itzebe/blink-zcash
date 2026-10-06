@@ -287,7 +287,7 @@ export default function ScanPage() {
           <textarea
             id="payload"
             className="textarea input--mono"
-            placeholder={'https://blink-web-bgkz.onrender.com/pay/8K4Q2X\nor zcash:u1…?amount=25&memo=…'}
+            placeholder={'https://<this-host>/pay/8K4Q2X\nor zcash:u1…?amount=25&memo=…'}
             spellCheck={false}
             autoComplete="off"
             value={input}

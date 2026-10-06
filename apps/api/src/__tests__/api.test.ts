@@ -884,3 +884,195 @@ describe('privacy capability', () => {
     expect(row?.privacy).toMatchObject({ recipientKind: 'sapling', level: 'shielded' });
   });
 });
+
+describe('payment link states (shareable /pay/<code>)', () => {
+  it('resolves an existing request with amount, purpose and privacy', async () => {
+    const { body } = await create({ purpose: 'remittance', amount: '12.5', currency: 'USD' });
+    const res = await built.app.inject({ url: `/v1/payment-requests/${body.shortCode}` });
+    expect(res.statusCode).toBe(200);
+    const req = res.json().request;
+    expect(req.amount).toBe('0.3125'); // $12.50 at $40/ZEC
+    expect(req.usdAmount).toBe('12.5');
+    expect(req.purpose).toBe('remittance');
+    expect(req.privacy.level).toBe('shielded');
+    expect(req.status).toBe('WAITING_FOR_PAYMENT');
+  });
+
+  it('returns 404 for a nonexistent request link', async () => {
+    const res = await built.app.inject({ url: '/v1/payment-requests/ZZZZZZZZZZZZZ' });
+    expect(res.statusCode).toBe(404);
+    expect(res.json().error).toBe('not_found');
+  });
+
+  it('returns 404 (not a 500) for a malformed request link', async () => {
+    const res = await built.app.inject({ url: '/v1/payment-requests/not-a-code' });
+    expect(res.statusCode).toBe(404);
+  });
+
+  it('reports an expired request and refuses to present it as payable', async () => {
+    let clock = new Date('2030-01-01T00:00:00Z');
+    const built2 = await buildApp({
+      config: loadConfig(baseEnv),
+      provider: new StubProvider(),
+      now: () => clock,
+    });
+    await built2.app.ready();
+    try {
+      const created = (
+        await built2.app.inject({
+          method: 'POST',
+          url: '/v1/payment-requests',
+          payload: {
+            recipientName: 'Joseph',
+            recipientAddress: TEST_SAPLING,
+            amount: '1',
+            expiryMinutes: 10,
+          },
+        })
+      ).json();
+      clock = new Date(clock.getTime() + 11 * 60_000);
+      const view = (
+        await built2.app.inject({ url: `/v1/payment-requests/${created.shortCode}` })
+      ).json();
+      expect(view.request.status).toBe('EXPIRED');
+      const details = await built2.app.inject({
+        url: `/v1/payment-requests/${created.shortCode}/payment-details`,
+      });
+      expect(details.statusCode).toBe(410);
+    } finally {
+      await built2.app.close();
+    }
+  });
+
+  it('reports an already-paid request as CONFIRMED', async () => {
+    const { body } = await create();
+    const code = body.shortCode;
+    const txid = 'c'.repeat(64);
+    await built.app.inject({
+      method: 'POST',
+      url: `/v1/payment-requests/${code}/transactions`,
+      payload: { txid },
+    });
+    provider.next = { txid, confirmations: 5, broadcast: true, source: 'stub' };
+    await built.app.inject({
+      method: 'POST',
+      url: `/v1/payment-requests/${code}/verify`,
+      payload: {},
+    });
+    const view = (await built.app.inject({ url: `/v1/payment-requests/${code}` })).json();
+    expect(view.request.status).toBe('CONFIRMED');
+    // Starting the flow again is refused, so a paid link cannot be double-paid.
+    const init = await built.app.inject({
+      method: 'POST',
+      url: `/v1/payment-requests/${code}/initiate`,
+      payload: {},
+    });
+    expect(init.statusCode).toBe(409);
+    expect(init.json().error).toBe('already_paid');
+  });
+
+  it('reports a cancelled request and refuses to present it as payable', async () => {
+    const { body } = await create();
+    const code = body.shortCode;
+    await built.app.inject({
+      method: 'POST',
+      url: `/v1/payment-requests/${code}/cancel`,
+      headers: { 'x-blink-management-token': body.managementToken },
+      payload: {},
+    });
+    const view = (await built.app.inject({ url: `/v1/payment-requests/${code}` })).json();
+    expect(view.request.status).toBe('CANCELLED');
+    const init = await built.app.inject({
+      method: 'POST',
+      url: `/v1/payment-requests/${code}/initiate`,
+      payload: {},
+    });
+    expect(init.statusCode).toBe(409);
+    expect(init.json().error).toBe('cancelled');
+  });
+});
+
+describe('receipt preserves the original USD snapshot and settlement', () => {
+  async function confirmUsd(usdAmount: string) {
+    const res = await built.app.inject({
+      method: 'POST',
+      url: '/v1/payment-requests',
+      payload: {
+        recipientName: 'Joseph',
+        recipientAddress: TEST_SAPLING,
+        amount: usdAmount,
+        currency: 'USD',
+        purpose: 'payroll',
+        memo: 'Salary',
+        expiryMinutes: 30,
+      },
+    });
+    const body = res.json();
+    const code = body.shortCode;
+    const txid = 'd'.repeat(64);
+    await built.app.inject({
+      method: 'POST',
+      url: `/v1/payment-requests/${code}/transactions`,
+      payload: { txid },
+    });
+    provider.next = { txid, confirmations: 4, broadcast: true, source: 'stub' };
+    await built.app.inject({
+      method: 'POST',
+      url: `/v1/payment-requests/${code}/verify`,
+      payload: {},
+    });
+    return { code, created: body };
+  }
+
+  it('shows the original USD amount, the ZEC settlement and the creation rate', async () => {
+    const { code } = await confirmUsd('100');
+    const receipt = (
+      await built.app.inject({ url: `/v1/payment-requests/${code}/receipt` })
+    ).json().receipt;
+    // Original request: $100 USD. Settlement: 2.5 ZEC at $40/ZEC.
+    expect(receipt.usdAmount).toBe('100');
+    expect(receipt.amount).toBe('2.5');
+    expect(receipt.currency).toBe('ZEC');
+    expect(receipt.zecUsdPrice).toBe('40');
+  });
+
+  it('keeps the USD snapshot even if the live price later moves', async () => {
+    const { code } = await confirmUsd('100');
+    priceProvider.price = {
+      provider: 'coinmarketcap',
+      asset: 'ZEC',
+      quote: 'USD',
+      price: '999',
+      observedAt: null,
+    };
+    const receipt = (
+      await built.app.inject({ url: `/v1/payment-requests/${code}/receipt` })
+    ).json().receipt;
+    expect(receipt.usdAmount).toBe('100');
+    expect(receipt.zecUsdPrice).toBe('40'); // creation rate, not 999
+    expect(receipt.amount).toBe('2.5');
+  });
+
+  it('preserves purpose and privacy status on the receipt', async () => {
+    const { code } = await confirmUsd('100');
+    const receipt = (
+      await built.app.inject({ url: `/v1/payment-requests/${code}/receipt` })
+    ).json().receipt;
+    expect(receipt.purpose).toBe('payroll');
+    expect(receipt.privacy.level).toBe('shielded');
+    expect(receipt.privacy.recipientKind).toBe('sapling');
+  });
+
+  it('issues a receipt only for a confirmed payment (a claim alone yields none)', async () => {
+    const { body } = await create();
+    const code = body.shortCode;
+    await built.app.inject({
+      method: 'POST',
+      url: `/v1/payment-requests/${code}/transactions`,
+      payload: { txid: 'e'.repeat(64) },
+    });
+    const receipt = await built.app.inject({ url: `/v1/payment-requests/${code}/receipt` });
+    expect(receipt.statusCode).toBe(409);
+    expect(receipt.json().error).toBe('not_confirmed');
+  });
+});

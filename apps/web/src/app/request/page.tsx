@@ -253,6 +253,7 @@ export default function RequestPage() {
             memo={created.request.memo}
             recipientName={created.request.recipientName}
             network={created.request.network}
+            privacy={created.request.privacy}
             status={created.request.status}
             statusLabel="Waiting for payment"
             statusTone="waiting"

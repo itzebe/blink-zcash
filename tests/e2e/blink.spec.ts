@@ -156,3 +156,74 @@ test.describe('BLINK core flow', () => {
     await expect(page.getByLabel('Amount')).toHaveValue('850');
   });
 });
+
+test.describe('privacy, payment links and receipts', () => {
+  const TEST_TRANSPARENT = 'tmEZhbWHTpdKMw5it8YDspUXSMGQyFwovpU';
+  const apiBase = () => process.env.E2E_API_URL ?? 'http://localhost:4000';
+
+  test('a shielded request is labelled a shielded payment in plain language', async ({
+    page,
+    request,
+  }) => {
+    const created = await request.post(`${apiBase()}/v1/payment-requests`, {
+      data: {
+        recipientName: 'Joseph',
+        recipientAddress: TEST_SAPLING,
+        amount: '5',
+        memo: 'Dinner',
+        expiryMinutes: 30,
+      },
+    });
+    const { shortCode } = (await created.json()) as { shortCode };
+
+    await page.goto(`/pay/${shortCode}`);
+    await expect(page.locator('.privacy--shielded')).toBeVisible();
+    await expect(page.locator('.privacy__headline')).toHaveText(/Shielded payment/);
+    // The application-level caveat is stated, not hidden.
+    await expect(page.getByText(/stored and shown in plaintext/i)).toBeVisible();
+    await expect(page.getByText(/anonymous/i)).toHaveCount(0);
+  });
+
+  test('a transparent request is labelled a public payment, never shielded', async ({
+    page,
+    request,
+  }) => {
+    const created = await request.post(`${apiBase()}/v1/payment-requests`, {
+      data: {
+        recipientName: 'Joseph',
+        recipientAddress: TEST_TRANSPARENT,
+        amount: '5',
+        expiryMinutes: 30,
+      },
+    });
+    const { shortCode } = (await created.json()) as { shortCode };
+
+    await page.goto(`/pay/${shortCode}`);
+    await expect(page.locator('.privacy--transparent')).toBeVisible();
+    await expect(page.locator('.privacy__headline')).toHaveText(/Public payment/);
+    await expect(page.getByText('Shielded payment')).toHaveCount(0);
+  });
+
+  test('an invalid payment link shows a clear not-found state', async ({ page }) => {
+    await page.goto('/pay/ZZZZZZZZZZZZZ');
+    await expect(page.getByText(/not found/i).first()).toBeVisible();
+    await expect(page.getByRole('link', { name: /create a new request/i })).toBeVisible();
+  });
+
+  test('a receipt is refused until the payment is confirmed', async ({ page, request }) => {
+    const created = await request.post(`${apiBase()}/v1/payment-requests`, {
+      data: {
+        recipientName: 'Joseph',
+        recipientAddress: TEST_SAPLING,
+        amount: '5',
+        expiryMinutes: 30,
+      },
+    });
+    const { shortCode } = (await created.json()) as { shortCode };
+
+    await page.goto(`/receipt/${shortCode}`);
+    await expect(page.locator('.alert--error')).toBeVisible();
+    // The headline is honest: no receipt is shown for an unconfirmed request.
+    await expect(page.getByText(/only issued for a confirmed payment/i)).toBeVisible();
+  });
+});

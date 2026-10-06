@@ -1,5 +1,12 @@
 import { describe, expect, it } from 'vitest';
-import { privacyCapability, privacyLines, withUnifiedReceivers } from './privacy.js';
+import {
+  BLINK_APP_PRIVACY_NOTE,
+  privacyCapability,
+  privacyHeadline,
+  privacyHeadlineSentence,
+  privacyLines,
+  withUnifiedReceivers,
+} from './privacy.js';
 
 describe('privacyCapability', () => {
   it('treats a Unified Address recipient as shielded', () => {
@@ -94,5 +101,53 @@ describe('privacyLines', () => {
     expect(lines[0]!.value).toBe('Protected');
     expect(lines[2]!.value).toBe('Depends on payer');
     expect(lines[3]!.value).toBe('Plaintext');
+  });
+});
+
+describe('privacyHeadline', () => {
+  it('calls a shielded route a shielded payment', () => {
+    expect(privacyHeadline(privacyCapability('unified'))).toBe('Shielded payment');
+    expect(privacyHeadline(privacyCapability('sapling'))).toBe('Shielded payment');
+  });
+
+  it('calls a transparent route a public payment, never shielded', () => {
+    expect(privacyHeadline(privacyCapability('transparent'))).toBe('Public payment');
+  });
+
+  it('downgrades a Unified Address with only a transparent receiver to public', () => {
+    const p = withUnifiedReceivers(privacyCapability('unified'), {
+      transparent: true,
+      sapling: false,
+      orchard: false,
+    });
+    expect(privacyHeadline(p)).toBe('Public payment');
+  });
+});
+
+describe('privacyHeadlineSentence', () => {
+  it('explains a shielded route without claiming the sender is hidden', () => {
+    const s = privacyHeadlineSentence(privacyCapability('sapling')).toLowerCase();
+    expect(s).toContain('protects');
+    expect(s).toContain('sender');
+    expect(s).toContain('depends');
+    expect(s).not.toContain('anonymous');
+  });
+
+  it('states plainly that a public route is visible to anyone', () => {
+    const s = privacyHeadlineSentence(privacyCapability('transparent')).toLowerCase();
+    expect(s).toContain('visible');
+    expect(s).not.toContain('anonymous');
+  });
+});
+
+describe('BLINK_APP_PRIVACY_NOTE', () => {
+  it('separates protocol privacy from what BLINK itself stores', () => {
+    const note = BLINK_APP_PRIVACY_NOTE.toLowerCase();
+    // Names the protocol guarantee...
+    expect(note).toContain('zcash');
+    // ...and the application-level caveat: the memo is plaintext.
+    expect(note).toContain('plaintext');
+    // Never claims the whole request is private or anonymous.
+    expect(note).not.toContain('anonymous');
   });
 });
