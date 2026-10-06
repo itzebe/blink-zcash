@@ -35,7 +35,7 @@ test.describe('BLINK core flow', () => {
     await page.getByLabel('Your Zcash address').fill(TEST_SAPLING);
     await page.getByRole('button', { name: /create payment/i }).click();
 
-    await expect(page.getByText(/payment object ready/i)).toBeVisible();
+    await expect(page.getByText(/private invoice/i)).toBeVisible();
     await expect(page.locator('.payment-card__amount-val')).toContainText('25');
     await expect(page.locator('.payment-card__memo')).toContainText('Dinner');
 
@@ -67,7 +67,7 @@ test.describe('BLINK core flow', () => {
     const body = (await created.json()) as { shortCode: string };
 
     await page.goto(`/pay/${body.shortCode}`);
-    await expect(page.getByText(/private payment request/i)).toBeVisible();
+    await expect(page.getByText(/private invoice/i)).toBeVisible();
     await expect(page.getByText('Joseph', { exact: true })).toBeVisible();
 
     await page.getByRole('button', { name: /pay with zcash/i }).click();
