@@ -9,6 +9,8 @@ describe('privacyCapability', () => {
     expect(p.amount).toBe('protected');
     // The sender is never claimed to be protected: a transparent payer stays public.
     expect(p.sender).toBe('varies');
+    // A memo is plaintext in BLINK even for a shielded recipient.
+    expect(p.memo).toBe('public');
     expect(p.supportsMemo).toBe(true);
   });
 
@@ -86,10 +88,11 @@ describe('withUnifiedReceivers', () => {
 });
 
 describe('privacyLines', () => {
-  it('renders ordered, factual lines', () => {
+  it('renders ordered, factual lines including the plaintext memo', () => {
     const lines = privacyLines(privacyCapability('unified'));
-    expect(lines.map((l) => l.label)).toEqual(['Recipient', 'Amount', 'Sender']);
+    expect(lines.map((l) => l.label)).toEqual(['Recipient', 'Amount', 'Sender', 'Memo']);
     expect(lines[0]!.value).toBe('Protected');
     expect(lines[2]!.value).toBe('Depends on payer');
+    expect(lines[3]!.value).toBe('Plaintext');
   });
 });

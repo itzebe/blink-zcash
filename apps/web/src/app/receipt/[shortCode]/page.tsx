@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { Shell, TopBar, Alert, Row } from '@/components/Shell';
 import { PrivacyPanel } from '@/components/PrivacyPanel';
 import { api, ApiError, type Receipt } from '@/lib/api';
+import { purposeLabel } from '@/lib/status';
 
 export default function ReceiptPage({ params }: { params: Promise<{ shortCode: string }> }) {
   const [shortCode, setShortCode] = useState<string | null>(null);
@@ -32,7 +33,7 @@ export default function ReceiptPage({ params }: { params: Promise<{ shortCode: s
       <TopBar network={receipt?.network === 'mainnet' ? 'mainnet' : 'testnet'} />
       <div className="stack">
         <div className="stack stack--sm">
-          <p className="kicker">Proof of payment</p>
+          <p className="kicker">{receipt ? purposeLabel(receipt.purpose) : 'Proof of payment'}</p>
           <h1>Payment verified</h1>
         </div>
 

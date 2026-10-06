@@ -52,6 +52,14 @@ export interface PrivacyCapability {
    * recipient).
    */
   sender: PrivacyFact;
+  /**
+   * How private the memo is. A Zcash shielded memo is encrypted on-chain, but
+   * BLINK stores, shows and encodes it in plaintext, so the honest answer is
+   * `public` (and the UI labels it "Plaintext"). Present so the privacy of the
+   * memo is stated by the same layer that classifies the route, never inferred
+   * per component.
+   */
+  memo: PrivacyFact;
   /** A short, human label for the route, e.g. "Shielded recipient". */
   routeLabel: string;
   /**
@@ -91,6 +99,8 @@ export function privacyCapability(recipientKind: AddressKind): PrivacyCapability
         recipient: 'protected',
         amount: 'protected',
         sender: 'varies',
+        // A memo is stored/displayed/encoded in plaintext by BLINK.
+        memo: 'public',
         routeLabel: 'Shielded recipient (Unified Address)',
         level: 'shielded',
         summary:
@@ -108,6 +118,8 @@ export function privacyCapability(recipientKind: AddressKind): PrivacyCapability
         recipient: 'protected',
         amount: 'protected',
         sender: 'varies',
+        // A memo is stored/displayed/encoded in plaintext by BLINK.
+        memo: 'public',
         routeLabel: 'Shielded recipient (Sapling)',
         level: 'shielded',
         summary:
@@ -125,6 +137,8 @@ export function privacyCapability(recipientKind: AddressKind): PrivacyCapability
         recipient: 'public',
         amount: 'public',
         sender: 'varies',
+        // A memo is stored/displayed/encoded in plaintext by BLINK.
+        memo: 'public',
         routeLabel: 'Transparent recipient',
         level: 'transparent',
         summary:
@@ -195,5 +209,8 @@ export function privacyLines(capability: PrivacyCapability): PrivacyLine[] {
     { label: 'Recipient', value: fact(capability.recipient), fact: capability.recipient },
     { label: 'Amount', value: fact(capability.amount), fact: capability.amount },
     { label: 'Sender', value: fact(capability.sender), fact: capability.sender },
+    // A memo is always plaintext in BLINK: shown as "Plaintext" rather than the
+    // generic "Public" so the wording is unmistakable.
+    { label: 'Memo', value: capability.memo === 'public' ? 'Plaintext' : fact(capability.memo), fact: capability.memo },
   ];
 }

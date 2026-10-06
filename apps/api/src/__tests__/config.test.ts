@@ -59,6 +59,17 @@ describe('loadConfig verification guardrails', () => {
     );
   });
 
+  it('requires an explicit DATABASE_URL in production', () => {
+    const { DATABASE_URL: _omit, ...withoutDb } = base as Record<string, string>;
+    expect(() =>
+      loadConfig({
+        ...withoutDb,
+        NODE_ENV: 'production',
+        BLINK_ENCRYPTION_KEY: 'a'.repeat(64),
+      } as NodeJS.ProcessEnv),
+    ).toThrow(/DATABASE_URL is required/);
+  });
+
   it('rejects a web/API network mismatch', () => {
     expect(() => loadConfig({ ...base, NEXT_PUBLIC_NETWORK: 'mainnet' })).toThrow(/must match/);
   });

@@ -27,6 +27,35 @@ export type AddressKind = 'transparent' | 'sapling' | 'unified';
 export type Currency = 'ZEC' | 'USD';
 
 /**
+ * The everyday workflow a payment request belongs to. This is *presentation
+ * metadata* only: it changes how the request is framed (a Private Invoice, a
+ * payroll line, a point-of-sale charge), never how it settles. Every purpose
+ * creates the same standards-compliant ZIP 321 request and settles in ZEC.
+ *
+ * A subscription is deliberately a payment-request workflow, not autonomous
+ * recurring charging: BLINK holds no funds and cannot move them, so a
+ * subscription issues a fresh dated request each period.
+ */
+export const PAYMENT_PURPOSES = [
+  'invoice',
+  'payroll',
+  'remittance',
+  'subscription',
+  'point_of_sale',
+] as const;
+
+export type PaymentPurpose = (typeof PAYMENT_PURPOSES)[number];
+
+/** Human-facing labels for each purpose. Shared so the API and UI never drift. */
+export const PAYMENT_PURPOSE_LABELS: Record<PaymentPurpose, string> = {
+  invoice: 'Private invoice',
+  payroll: 'Private payroll',
+  remittance: 'Private remittance',
+  subscription: 'Private subscription',
+  point_of_sale: 'Point of sale',
+};
+
+/**
  * A normalized ZEC/USD price observation from a price provider.
  *
  * Deliberately small: the raw provider payload is never propagated to clients.
@@ -211,6 +240,8 @@ export interface PaymentRequest {
   recipientAddress: string;
   amount: string;
   currency: Currency;
+  /** Everyday workflow this request belongs to. Presentation metadata only. */
+  purpose: PaymentPurpose;
   memo: string | null;
   label: string | null;
   message: string | null;
@@ -243,6 +274,8 @@ export interface PublicPaymentRequest {
   priceProvider: string | null;
   /** Provider price timestamp (ISO 8601), or null when unavailable. */
   priceObservedAt: string | null;
+  /** Everyday workflow this request belongs to (invoice, payroll, …). */
+  purpose: PaymentPurpose;
   memo: string | null;
   network: ZcashNetwork;
   status: PaymentStatus;

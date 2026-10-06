@@ -2,12 +2,13 @@
 
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
-import { convertUsdToZec, settledZecAmount, privacyCapability, type PrivacyCapability } from '@blink/shared';
+import { convertUsdToZec, settledZecAmount, privacyCapability, type PrivacyCapability, type PaymentPurpose } from '@blink/shared';
 import { parseAddress } from '@blink/zcash';
 import { Shell, TopBar, Alert } from '@/components/Shell';
 import { BlinkPaymentCard } from '@/components/BlinkPaymentCard';
 import { PrivacyPanel } from '@/components/PrivacyPanel';
 import { api, ApiError, type CreatedPaymentRequest } from '@/lib/api';
+import { purposeLabel } from '@/lib/status';
 
 const NETWORK = (process.env.NEXT_PUBLIC_NETWORK ?? 'testnet') as 'testnet' | 'mainnet';
 
@@ -39,7 +40,16 @@ interface UseCaseMode {
 
 const MODES: UseCaseMode[] = [
   {
-    id: 'pos',
+    id: 'invoice',
+    label: 'Invoice',
+    amount: '25',
+    currency: 'USD',
+    memo: 'Invoice',
+    expiryMinutes: 1440,
+    hint: 'A private invoice. Share the link; your address stays out of it.',
+  },
+  {
+    id: 'point_of_sale',
     label: 'Point of sale',
     amount: '5',
     currency: 'USD',
@@ -76,6 +86,15 @@ const MODES: UseCaseMode[] = [
   },
 ];
 
+/** The everyday workflow each preset maps to (the API `purpose` field). */
+const MODE_PURPOSE: Record<string, PaymentPurpose> = {
+  invoice: 'invoice',
+  point_of_sale: 'point_of_sale',
+  payroll: 'payroll',
+  remittance: 'remittance',
+  subscription: 'subscription',
+};
+
 /** Best-effort client-side preview of the server's USD -> ZEC conversion. */
 function previewZec(usd: string, price: string | null): string | null {
   if (!price || !usd.trim()) return null;
@@ -110,6 +129,7 @@ export default function RequestPage() {
   const [memo, setMemo] = useState('');
   const [expiryMinutes, setExpiryMinutes] = useState(30);
   const [mode, setMode] = useState<string | null>(null);
+  const [purpose, setPurpose] = useState<PaymentPurpose>('invoice');
 
   const [price, setPrice] = useState<string | null>(null);
   const [priceError, setPriceError] = useState<string | null>(null);
@@ -127,6 +147,7 @@ export default function RequestPage() {
     setCurrency(next.currency);
     setMemo(next.memo);
     setExpiryMinutes(next.expiryMinutes);
+    setPurpose(MODE_PURPOSE[next.id] ?? 'invoice');
   }
 
   // Preview the live rate only when the request is USD-denominated. The server
@@ -169,6 +190,7 @@ export default function RequestPage() {
         recipientAddress: recipientAddress.trim(),
         amount: amount.trim(),
         currency,
+        purpose,
         ...(memo.trim() ? { memo: memo.trim() } : {}),
         expiryMinutes,
       });
@@ -216,7 +238,7 @@ export default function RequestPage() {
         <TopBar network={created.request.network} />
         <div className="stack">
           <div className="stack stack--sm" style={{ textAlign: 'center' }}>
-            <p className="kicker">Payment object ready</p>
+            <p className="kicker">{purposeLabel(created.request.purpose)}</p>
             <h1>Share your private request.</h1>
             <p className="lede">
               Anyone with this link can pay you. Your Zcash address stays hidden on the server.
@@ -291,10 +313,11 @@ export default function RequestPage() {
           <h1>Get paid with a link.</h1>
         </div>
 
-        {/* Use-case presets. Each only pre-fills the same request flow. */}
+        {/* Presets pre-fill the same request flow; the Purpose control below is
+            the label actually stored on the request. */}
         <div className="field">
-          <span className="field__label">Mode</span>
-          <div className="mode-chips" role="group" aria-label="Use case">
+          <span className="field__label">Start from a preset</span>
+          <div className="mode-chips" role="group" aria-label="Preset">
             {MODES.map((m) => (
               <button
                 key={m.id}
@@ -310,6 +333,34 @@ export default function RequestPage() {
           {mode ? (
             <p className="mode-chip__hint">{MODES.find((m) => m.id === mode)?.hint}</p>
           ) : null}
+        </div>
+
+        <div className="field">
+          <span className="field__label" id="purpose-label">
+            Purpose
+          </span>
+          <div
+            className="segmented segmented--sm segmented--wrap"
+            role="radiogroup"
+            aria-labelledby="purpose-label"
+          >
+            {(Object.keys(MODE_PURPOSE) as Array<keyof typeof MODE_PURPOSE>).map((id) => (
+              <span key={id}>
+                <input
+                  type="radio"
+                  id={`purpose-${id}`}
+                  name="purpose"
+                  checked={purpose === MODE_PURPOSE[id]}
+                  onChange={() => setPurpose(MODE_PURPOSE[id])}
+                />
+                <label htmlFor={`purpose-${id}`}>{purposeLabel(MODE_PURPOSE[id])}</label>
+              </span>
+            ))}
+          </div>
+          <p className="tiny muted">
+            A label for your own reference. It never changes how the request settles — every request
+            is a ZIP 321 payment in ZEC.
+          </p>
         </div>
 
         {error ? <Alert kind="error">{error}</Alert> : null}

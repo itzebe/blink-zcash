@@ -16,7 +16,9 @@ BLINK: a non-custodial Zcash payment-request app built on ZIP 321. Monorepo
 - `packages/payment-request` — ZIP 321 URI build/parse (`buildZip321Uri`,
   `buildSinglePaymentUri`, `parseSinglePayment`, `parseZip321`, `Zip321Error`,
   `base64urlEncode/Decode`, `encodeQchar/decodeQchar`).
-- `packages/ui` — presentational components (React peer dep `^18.3.1 || ^19`).
+- `packages/ui` — **REMOVED.** Nothing imported `@blink/ui`; the web app uses
+  its own `apps/web/src/components`. Do not re-add a workspace package nothing
+  consumes.
 - `apps/api` — Fastify + Postgres/Drizzle. `server.ts` builds the app
   (`buildApp({config, provider, crypto, now})` → `{app, service, config, db,
   crypto}`). Routes in `routes/index.ts`. Services: `payment-service.ts`,
@@ -65,8 +67,14 @@ Rust checks used in CI: `cargo fmt --all -- --check`,
 
 ## Gotchas
 
-- `@blink/ui` peerReact was bumped to `^18.3.1 || ^19.0.0` to avoid a React 18/19
-  `useContext` prerender crash in Next 15. Keep it compatible with 19.
+- **React 18/19 prerender.** `@blink/ui` (removed) once hit a React 18/19
+  `useContext` prerender crash in Next 15. The web app is React 19 only; keep any
+  shared React component compatible with 19.
+- **Toolchain versions are load-bearing.** `vitest` is pinned to the v4 line
+  (v5 requires Node ≥ 22.12, which the Render image does not guarantee) and the
+  root `package.json` `overrides` force `shell-quote ^1.12` and Next's `postcss`
+  to `^8.5.29`. `npm audit` is clean; keep it that way. Re-run `npm ci` (not just
+  `npm install`) after changing overrides, or the nested copy is not re-resolved.
 - API `tsconfig` excludes tests; `buildApp` is the test entry point.
 - `.env` is git-ignored; `.env.example` has placeholders only.
 - **NU7 decode.** Zcash testnet activates NU7 (consensus branch `0x77190AD9`) in
@@ -132,6 +140,21 @@ Rust checks used in CI: `cargo fmt --all -- --check`,
   asserts the entry is ZEC (id `1437`, NOT `328` which is Monero) and the quote
   is USD, and refuses otherwise. Tests use the real array shape — a fabricated
   object payload previously hid the wrong id and an AttributeError on live data.
+- **Payment `purpose` is presentation metadata.** `invoice` (default), `payroll`,
+  `remittance`, `subscription`, `point_of_sale`. Stored on the row, echoed in
+  `toPublic` and the receipt, and used to frame the UI. It NEVER changes how a
+  request settles: every request is the same ZIP 321 payment in ZEC. Do not let a
+  purpose imply a fabricated transaction or autonomous recurring charge.
+- **The memo privacy fact is `public` by design.** `PrivacyCapability.memo` is
+  always `'public'` and the UI renders it as "Plaintext". A shielded memo is
+  encrypted on-chain, but BLINK stores/shows/encodes it in the clear; only the
+  recipient *address* is encrypted at rest. Never label the memo protected.
+- **`/v1/activity` and `resolveOwner` are gone.** There is no server-side account
+  system; per-device history came from `localStorage`, and that page is removed.
+  Do not reintroduce an owner-scoped route without a real auth model.
+- **Production requires an explicit `DATABASE_URL`.** `loadConfig` throws in
+  production if `DATABASE_URL` is unset/blank, so the API can never silently boot
+  against the localhost development default.
 
 ## Deployment
 

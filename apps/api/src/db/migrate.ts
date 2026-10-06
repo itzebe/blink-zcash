@@ -28,6 +28,7 @@ CREATE TABLE IF NOT EXISTS payment_requests (
   recipient_address_fingerprint text,
   amount text NOT NULL,
   currency text NOT NULL DEFAULT 'ZEC',
+  purpose text NOT NULL DEFAULT 'invoice',
   usd_amount text,
   zec_usd_price text,
   price_provider text,
@@ -59,6 +60,8 @@ ALTER TABLE payment_requests ADD COLUMN IF NOT EXISTS zec_usd_price text;
 ALTER TABLE payment_requests ADD COLUMN IF NOT EXISTS price_provider text;
 ALTER TABLE payment_requests ADD COLUMN IF NOT EXISTS price_observed_at timestamptz;
 ALTER TABLE payment_requests ADD COLUMN IF NOT EXISTS privacy jsonb;
+-- Additive migration for the everyday-workflow label (invoice, payroll, …).
+ALTER TABLE payment_requests ADD COLUMN IF NOT EXISTS purpose text NOT NULL DEFAULT 'invoice';
 
 CREATE TABLE IF NOT EXISTS payment_events (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),

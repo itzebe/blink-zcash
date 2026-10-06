@@ -19,6 +19,7 @@ export function PrivacyPanel({
     { label: 'Recipient', fact: privacy.recipient },
     { label: 'Amount', fact: privacy.amount },
     { label: 'Sender', fact: privacy.sender },
+    { label: 'Memo', fact: privacy.memo },
   ] as const;
 
   return (
@@ -35,7 +36,9 @@ export function PrivacyPanel({
               {f.fact === 'protected'
                 ? 'Protected'
                 : f.fact === 'public'
-                  ? 'Public'
+                  ? f.label === 'Memo'
+                    ? 'Plaintext'
+                    : 'Public'
                   : 'Depends on payer'}
             </span>
           </span>

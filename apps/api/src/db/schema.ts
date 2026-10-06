@@ -56,6 +56,12 @@ export const paymentRequests = pgTable(
     amount: text('amount').notNull(),
     currency: text('currency').notNull().default('ZEC'),
     /**
+     * Everyday workflow this request belongs to (invoice, payroll, remittance,
+     * subscription, point of sale). Presentation metadata only: it never changes
+     * how the request settles. Defaults to `invoice`.
+     */
+    purpose: text('purpose').notNull().default('invoice'),
+    /**
      * Original requested amount in USD, when the recipient denominated the
      * request in USD. Null for a native ZEC request. Kept so the payer always
      * sees exactly what was requested, independent of later market moves.

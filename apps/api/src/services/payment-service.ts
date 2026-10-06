@@ -18,6 +18,7 @@ import {
   parseZecToZatoshis,
   privacyCapability,
   type Currency,
+  type PaymentPurpose,
   type PaymentStatus,
   type PrivacyCapability,
   type PublicPaymentRequest,
@@ -30,7 +31,7 @@ import {
   InvalidAddressError,
   type AddressKind,
 } from '@blink/zcash';
-import { and, desc, eq, lt, sql } from 'drizzle-orm';
+import { and, eq, lt, sql } from 'drizzle-orm';
 import type { Database } from '../db/index.js';
 import { paymentEvents, paymentRequests, transactions } from '../db/schema.js';
 import type { Crypto } from '../crypto.js';
@@ -52,6 +53,8 @@ export interface CreatePaymentRequestInput {
   memo?: string | null;
   label?: string | null;
   message?: string | null;
+  /** Everyday workflow label. Presentation metadata; defaults to `invoice`. */
+  purpose?: PaymentPurpose;
   expiryMinutes?: number;
   ownerId?: string | null;
 }
@@ -330,6 +333,7 @@ export class PaymentService {
     const memo = this.validateMemo(input.memo, kind);
     const label = input.label?.trim() || null;
     const message = input.message?.trim() || null;
+    const purpose: PaymentPurpose = input.purpose ?? 'invoice';
 
     // Snapshot the protocol-accurate privacy capability of this route from the
     // recipient address kind. Stored so a receipt always reports what was shown.
@@ -354,6 +358,7 @@ export class PaymentService {
         recipientAddressFingerprint: fingerprint,
         amount: canonicalAmount,
         currency: resolved.currency,
+        purpose,
         usdAmount: resolved.usdAmount,
         zecUsdPrice: resolved.zecUsdPrice,
         priceProvider: resolved.priceProvider,
@@ -420,6 +425,7 @@ export class PaymentService {
       zecUsdPrice: row.zecUsdPrice,
       priceProvider: row.priceProvider,
       priceObservedAt: row.priceObservedAt ? row.priceObservedAt.toISOString() : null,
+      purpose: (row.purpose ?? 'invoice') as PaymentPurpose,
       memo: row.memo,
       network: row.network as ZcashNetwork,
       status: row.status as PaymentStatus,
@@ -682,15 +688,6 @@ export class PaymentService {
       .where(eq(paymentRequests.id, row.id));
     await this.recordEvent(row.id, 'CANCELLED', {});
     return (await this.findByShortCode(shortCode))!;
-  }
-
-  async listForOwner(ownerId: string) {
-    return this.opts.db
-      .select()
-      .from(paymentRequests)
-      .where(eq(paymentRequests.ownerId, ownerId))
-      .orderBy(desc(paymentRequests.createdAt))
-      .limit(100);
   }
 
   async listEvents(paymentRequestId: string) {

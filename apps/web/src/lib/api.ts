@@ -7,7 +7,7 @@
  * reports what a verification provider actually observed.
  */
 
-import type { PrivacyCapability } from '@blink/shared';
+import type { PrivacyCapability, PaymentPurpose } from '@blink/shared';
 
 export interface PublicPaymentRequest {
   shortCode: string;
@@ -22,6 +22,8 @@ export interface PublicPaymentRequest {
   zecUsdPrice: string | null;
   priceProvider: string | null;
   priceObservedAt: string | null;
+  /** Everyday workflow this request belongs to (invoice, payroll, …). */
+  purpose: PaymentPurpose;
   memo: string | null;
   network: 'testnet' | 'mainnet';
   status: string;
@@ -113,6 +115,8 @@ export interface CreateInput {
    */
   amount: string;
   currency?: 'ZEC' | 'USD';
+  /** Everyday workflow label. Presentation metadata; defaults to `invoice`. */
+  purpose?: PaymentPurpose;
   memo?: string;
   expiryMinutes: number;
 }
@@ -190,6 +194,8 @@ export interface Receipt {
   usdAmount: string | null;
   /** ZEC/USD price used at creation, or null for a native ZEC request. */
   zecUsdPrice: string | null;
+  /** Everyday workflow this request belongs to. */
+  purpose: PaymentPurpose;
   memo: string | null;
   network: string;
   privacy: PrivacyCapability;
