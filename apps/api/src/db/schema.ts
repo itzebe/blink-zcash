@@ -55,6 +55,18 @@ export const paymentRequests = pgTable(
     recipientAddressFingerprint: text('recipient_address_fingerprint'),
     amount: text('amount').notNull(),
     currency: text('currency').notNull().default('ZEC'),
+    /**
+     * Original requested amount in USD, when the recipient denominated the
+     * request in USD. Null for a native ZEC request. Kept so the payer always
+     * sees exactly what was requested, independent of later market moves.
+     */
+    usdAmount: text('usd_amount'),
+    /** ZEC/USD price used to convert `usdAmount`. Null for a native ZEC request. */
+    zecUsdPrice: text('zec_usd_price'),
+    /** Price provider id, e.g. "coinmarketcap". */
+    priceProvider: text('price_provider'),
+    /** Provider price timestamp, when supplied. */
+    priceObservedAt: timestamp('price_observed_at', { withTimezone: true }),
     memo: text('memo'),
     label: text('label'),
     message: text('message'),

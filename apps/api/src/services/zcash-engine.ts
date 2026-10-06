@@ -67,11 +67,23 @@ export function createZcashEngine(serviceUrl: string, timeoutMs = 3000): ZcashEn
     try {
       const res = await fetch(new URL(path, serviceUrl), {
         method: 'POST',
-        headers: { 'content-type': 'application/json' },
+        headers: { 'content-type': 'application/json', accept: 'application/json' },
         body: JSON.stringify(body),
         signal: controller.signal,
       });
-      const json = (await res.json()) as Record<string, unknown>;
+      const text = await res.text();
+      let json: Record<string, unknown>;
+      try {
+        json = text ? (JSON.parse(text) as Record<string, unknown>) : {};
+      } catch {
+        // A non-JSON body means the URL did not reach the engine (a frontend, a
+        // proxy, or a host's HTML 404 page). Report that plainly instead of
+        // surfacing a raw `Unexpected token '<'` parse error.
+        throw new EngineUnavailableError(
+          `blink-zcash service returned a non-JSON response (HTTP ${res.status}) from ${path}; ` +
+            'the configured BLINK_ZCASH_SERVICE_URL does not point at the blink-zcash engine',
+        );
+      }
       if (!res.ok) {
         const message = typeof json.error === 'string' ? json.error : 'engine rejected request';
         throw new EngineUnavailableError(message);

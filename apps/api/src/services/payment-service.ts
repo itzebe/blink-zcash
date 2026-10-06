@@ -11,7 +11,9 @@ import {
   canTransition,
   ALLOWED_EXPIRY_MINUTES,
   MAX_MEMO_BYTES,
+  convertUsdToZec,
   formatZatoshisToZec,
+  normaliseUsdAmount,
   parseZecToZatoshis,
   type Currency,
   type PaymentStatus,
@@ -32,10 +34,16 @@ import type { Crypto } from '../crypto.js';
 import { generateShortCode, isValidShortCode } from './short-code.js';
 import type { EngineUnavailableError, ZcashEngine } from './zcash-engine.js';
 import type { VerificationProvider } from './verification-provider.js';
+import { PriceUnavailableError, type ZecUsdPriceProvider } from './price-service.js';
 
 export interface CreatePaymentRequestInput {
   recipientName: string;
   recipientAddress: string;
+  /**
+   * Requested amount. When `currency` is `ZEC` (default) this is a ZEC decimal
+   * string. When `currency` is `USD` this is a USD decimal string that the
+   * server converts to ZEC using a live price.
+   */
   amount: string;
   currency?: Currency;
   memo?: string | null;
@@ -63,6 +71,11 @@ export interface PaymentServiceOptions {
   provider: VerificationProvider;
   network: ZcashNetwork;
   confirmationsRequired: number;
+  /**
+   * Live ZEC/USD price source. Required only to create USD-denominated
+   * requests; a native ZEC request never calls it.
+   */
+  priceProvider?: ZecUsdPriceProvider;
   now?: () => Date;
   /** Test hook: lets tests force a deterministic short code. */
   generateCode?: () => string;
@@ -193,21 +206,107 @@ export class PaymentService {
     }
   }
 
-  async create(input: CreatePaymentRequestInput) {
+  /**
+   * Resolve the requested amount into the ZEC amount ZIP 321 will carry.
+   *
+   * A ZEC request is validated and canonicalised locally. A USD request is
+   * converted server-side using a live price — the client can never supply the
+   * ZEC amount, so a malicious client cannot claim an arbitrary conversion.
+   */
+  private async resolveAmount(input: CreatePaymentRequestInput): Promise<{
+    currency: Currency;
+    zecAmount: string;
+    usdAmount: string | null;
+    zecUsdPrice: string | null;
+    priceProvider: string | null;
+    priceObservedAt: Date | null;
+  }> {
     const currency: Currency = input.currency ?? 'ZEC';
-    if (currency !== 'ZEC') {
-      throw new PaymentRequestError('only ZEC is supported', 'unsupported_currency');
+
+    if (currency === 'ZEC') {
+      let zecAmount: string;
+      try {
+        zecAmount = formatZatoshisToZec(parseZecToZatoshis(input.amount));
+      } catch (err) {
+        throw new PaymentRequestError(`invalid amount: ${(err as Error).message}`, 'invalid_amount');
+      }
+      return {
+        currency,
+        zecAmount,
+        usdAmount: null,
+        zecUsdPrice: null,
+        priceProvider: null,
+        priceObservedAt: null,
+      };
     }
 
-    // Validate the amount by round-tripping through zatoshis. This rejects
-    // malformed amounts and normalises leading/trailing zeros without ever
-    // changing the value.
-    let canonicalAmount: string;
-    try {
-      canonicalAmount = formatZatoshisToZec(parseZecToZatoshis(input.amount));
-    } catch (err) {
-      throw new PaymentRequestError(`invalid amount: ${(err as Error).message}`, 'invalid_amount');
+    if (currency !== 'USD') {
+      throw new PaymentRequestError('only ZEC and USD are supported', 'unsupported_currency');
     }
+
+    let usdAmount: string;
+    try {
+      usdAmount = normaliseUsdAmount(input.amount);
+    } catch (err) {
+      throw new PaymentRequestError(
+        `invalid USD amount: ${(err as Error).message}`,
+        'invalid_amount',
+      );
+    }
+
+    const priceProvider = this.opts.priceProvider;
+    if (!priceProvider) {
+      throw new PaymentRequestError(
+        'USD-denominated requests require a configured price provider',
+        'price_unavailable',
+        503,
+      );
+    }
+
+    let price;
+    try {
+      price = await priceProvider.getZecUsdPrice();
+    } catch (err) {
+      if (err instanceof PriceUnavailableError) {
+        throw new PaymentRequestError(
+          `could not obtain a live ZEC/USD price: ${err.message}`,
+          err.code === 'not_configured' ? 'price_not_configured' : 'price_unavailable',
+          503,
+        );
+      }
+      throw err;
+    }
+
+    let conversion;
+    try {
+      conversion = convertUsdToZec(usdAmount, price.price);
+    } catch (err) {
+      throw new PaymentRequestError(
+        `could not convert USD to ZEC: ${(err as Error).message}`,
+        'conversion_failed',
+      );
+    }
+
+    // USD almost never converts to a whole number of zatoshis (1 ZEC = 1e8
+    // zatoshis). Round UP to the next zatoshi so the request always asks for at
+    // least the USD-equivalent value; the difference is < 1 zatoshi (1e-8 ZEC).
+    // Never round down, which would under-ask the payer, and never round the
+    // amount to a whole ZEC (the USD input must not be mistaken for ZEC).
+    const settledZatoshis = conversion.rounded ? conversion.zatoshis + 1n : conversion.zatoshis;
+
+    return {
+      currency,
+      zecAmount: formatZatoshisToZec(settledZatoshis),
+      usdAmount: conversion.usd,
+      zecUsdPrice: conversion.price,
+      priceProvider: price.provider,
+      priceObservedAt: price.observedAt ? new Date(price.observedAt) : null,
+    };
+  }
+
+  async create(input: CreatePaymentRequestInput) {
+    const resolved = await this.resolveAmount(input);
+    const canonicalAmount = resolved.zecAmount;
 
     const expiryMinutes = input.expiryMinutes ?? 30;
     if (
@@ -250,7 +349,11 @@ export class PaymentService {
         recipientAddressKind: kind,
         recipientAddressFingerprint: fingerprint,
         amount: canonicalAmount,
-        currency,
+        currency: resolved.currency,
+        usdAmount: resolved.usdAmount,
+        zecUsdPrice: resolved.zecUsdPrice,
+        priceProvider: resolved.priceProvider,
+        priceObservedAt: resolved.priceObservedAt,
         memo,
         label,
         message,
@@ -306,7 +409,12 @@ export class PaymentService {
       shortCode: row.shortCode,
       recipientName: row.recipientName,
       amount: row.amount,
-      currency: row.currency as Currency,
+      // ZIP 321 amounts are always ZEC; a USD request is settled in ZEC.
+      currency: 'ZEC',
+      usdAmount: row.usdAmount,
+      zecUsdPrice: row.zecUsdPrice,
+      priceProvider: row.priceProvider,
+      priceObservedAt: row.priceObservedAt ? row.priceObservedAt.toISOString() : null,
       memo: row.memo,
       network: row.network as ZcashNetwork,
       status: row.status as PaymentStatus,

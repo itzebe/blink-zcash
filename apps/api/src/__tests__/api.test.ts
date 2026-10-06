@@ -13,6 +13,8 @@ import { sql } from 'drizzle-orm';
 import { buildApp, type BuiltApp } from '../server.js';
 import { loadConfig } from '../config.js';
 import type { Observation, VerificationProvider } from '../services/verification-provider.js';
+import { PriceUnavailableError, type ZecUsdPriceProvider } from '../services/price-service.js';
+import type { ZecUsdPrice } from '@blink/shared';
 import { paymentRequests } from '../db/schema.js';
 
 const DATABASE_URL =
@@ -35,6 +37,26 @@ const baseEnv = {
   BLINK_CONFIRMATIONS_REQUIRED: '1',
 } as unknown as NodeJS.ProcessEnv;
 
+/** A price provider whose result each test sets explicitly. */
+class StubPriceProvider implements ZecUsdPriceProvider {
+  readonly name = 'stub';
+  price: ZecUsdPrice | null = {
+    provider: 'coinmarketcap',
+    asset: 'ZEC',
+    quote: 'USD',
+    price: '40',
+    observedAt: '2026-01-01T00:00:00.000Z',
+  };
+  error: PriceUnavailableError | null = null;
+  calls = 0;
+
+  async getZecUsdPrice(): Promise<ZecUsdPrice> {
+    this.calls += 1;
+    if (this.error) throw this.error;
+    return this.price!;
+  }
+}
+
 /** A provider whose behaviour each test sets explicitly. */
 class StubProvider implements VerificationProvider {
   readonly name = 'stub';
@@ -49,11 +71,13 @@ class StubProvider implements VerificationProvider {
 
 let built: BuiltApp;
 let provider: StubProvider;
+let priceProvider: StubPriceProvider;
 
 beforeAll(async () => {
   const config = loadConfig(baseEnv);
   provider = new StubProvider();
-  built = await buildApp({ config, provider });
+  priceProvider = new StubPriceProvider();
+  built = await buildApp({ config, provider, priceProvider });
   await built.app.ready();
 });
 
@@ -64,6 +88,15 @@ afterAll(async () => {
 beforeEach(async () => {
   provider.next = null;
   provider.calls = 0;
+  priceProvider.price = {
+    provider: 'coinmarketcap',
+    asset: 'ZEC',
+    quote: 'USD',
+    price: '40',
+    observedAt: '2026-01-01T00:00:00.000Z',
+  };
+  priceProvider.error = null;
+  priceProvider.calls = 0;
   await built.db.delete(paymentRequests);
 });
 
@@ -155,6 +188,155 @@ describe('POST /v1/payment-requests', () => {
     const { status, body } = await create({ amount: 'twenty five' });
     expect(status).toBe(400);
     expect(body.error).toBe('invalid_amount');
+  });
+});
+
+describe('USD-denominated payment requests', () => {
+  async function createUsd(overrides: Record<string, unknown> = {}) {
+    const res = await built.app.inject({
+      method: 'POST',
+      url: '/v1/payment-requests',
+      payload: {
+        recipientName: 'Joseph',
+        recipientAddress: TEST_SAPLING,
+        amount: '25',
+        currency: 'USD',
+        expiryMinutes: 30,
+        ...overrides,
+      },
+    });
+    return { status: res.statusCode, body: res.json() };
+  }
+
+  it('converts $25 at $40/ZEC to amount=0.625 and never amount=25 (test 1)', async () => {
+    const { status, body } = await createUsd();
+    expect(status).toBe(201);
+    expect(body.request.amount).toBe('0.625');
+    expect(body.request.currency).toBe('ZEC');
+    expect(body.request.usdAmount).toBe('25');
+    expect(body.request.zecUsdPrice).toBe('40');
+    expect(body.request.priceProvider).toBe('coinmarketcap');
+    expect(body.zip321Uri).toContain('amount=0.625');
+    expect(body.zip321Uri).not.toContain('amount=25');
+  });
+
+  it('converts $1 at $40/ZEC to 0.025 ZEC, never 1 ZEC (test 2)', async () => {
+    const { body } = await createUsd({ amount: '1' });
+    expect(body.request.amount).toBe('0.025');
+    expect(body.zip321Uri).toContain('amount=0.025');
+    expect(body.zip321Uri).not.toMatch(/amount=1(&|$)/);
+  });
+
+  it('converts $100 at $50/ZEC to 2 ZEC (test 3)', async () => {
+    priceProvider.price = {
+      provider: 'coinmarketcap',
+      asset: 'ZEC',
+      quote: 'USD',
+      price: '50',
+      observedAt: null,
+    };
+    const { body } = await createUsd({ amount: '100' });
+    expect(body.request.amount).toBe('2');
+    expect(body.zip321Uri).toContain('amount=2');
+  });
+
+  it('keeps the original conversion when the market price later changes (test 4)', async () => {
+    const { body } = await createUsd({ amount: '25' });
+    expect(body.request.amount).toBe('0.625');
+
+    priceProvider.price = {
+      provider: 'coinmarketcap',
+      asset: 'ZEC',
+      quote: 'USD',
+      price: '50',
+      observedAt: null,
+    };
+    const view = (await built.app.inject({ url: `/v1/payment-requests/${body.shortCode}` })).json();
+    expect(view.request.amount).toBe('0.625');
+    expect(view.request.usdAmount).toBe('25');
+    expect(view.request.zecUsdPrice).toBe('40');
+  });
+
+  it('fails safely when the price provider is unavailable (test 5)', async () => {
+    priceProvider.error = new PriceUnavailableError('provider unreachable', 'unreachable');
+    const { status, body } = await createUsd();
+    expect(status).toBe(503);
+    expect(body.error).toBe('price_unavailable');
+    const list = await built.db.execute(sql`select count(*)::int as n from payment_requests`);
+    expect((list.rows[0] as { n: number }).n).toBe(0);
+  });
+
+  it('reports a configuration error when the price provider is not configured (test 6)', async () => {
+    priceProvider.error = new PriceUnavailableError('not configured', 'not_configured');
+    const { status, body } = await createUsd();
+    expect(status).toBe(503);
+    expect(body.error).toBe('price_not_configured');
+  });
+
+  it('rejects an invalid/zero price (test 7)', async () => {
+    priceProvider.price = {
+      provider: 'coinmarketcap',
+      asset: 'ZEC',
+      quote: 'USD',
+      price: '0',
+      observedAt: null,
+    };
+    const { status, body } = await createUsd();
+    expect(status).toBe(400);
+    expect(body.error).toBe('conversion_failed');
+  });
+
+  it('rounds a non-whole-zatoshi USD amount UP to the next zatoshi', async () => {
+    priceProvider.price = {
+      provider: 'coinmarketcap',
+      asset: 'ZEC',
+      quote: 'USD',
+      price: '40.25',
+      observedAt: null,
+    };
+    const { status, body } = await createUsd({ amount: '25' });
+    expect(status).toBe(201);
+    // 2500 / 4025 * 1e8 = 62_111_801.24... zatoshis -> rounded up to 62_111_802.
+    expect(body.request.amount).toBe('0.62111802');
+    expect(body.request.usdAmount).toBe('25');
+    expect(body.request.zecUsdPrice).toBe('40.25');
+    // Never the raw USD number, and never rounded down.
+    expect(body.request.amount).not.toBe('25');
+    expect(body.zip321Uri).toContain('amount=0.62111802');
+    expect(body.zip321Uri).not.toContain('amount=25');
+  });
+
+  it('handles a realistic high ZEC price for $1 and $25 without treating USD as ZEC', async () => {
+    priceProvider.price = {
+      provider: 'coinmarketcap',
+      asset: 'ZEC',
+      quote: 'USD',
+      price: '1365.99',
+      observedAt: '2026-10-06T00:00:00.000Z',
+    };
+    const one = await createUsd({ amount: '1' });
+    expect(one.status).toBe(201);
+    expect(one.body.request.amount).toBe('0.00073207');
+    expect(one.body.zip321Uri).toContain('amount=0.00073207');
+    expect(one.body.zip321Uri).not.toMatch(/amount=1(&|$)/);
+
+    const twentyFive = await createUsd({ amount: '25' });
+    expect(twentyFive.status).toBe(201);
+    expect(twentyFive.body.request.amount).toBe('0.01830175');
+    expect(twentyFive.body.request.usdAmount).toBe('25');
+    expect(twentyFive.body.zip321Uri).toContain('amount=0.01830175');
+    expect(twentyFive.body.zip321Uri).not.toContain('amount=25');
+  });
+
+  it('rejects malformed USD amounts', async () => {
+    const { status, body } = await createUsd({ amount: '25.001' });
+    expect(status).toBe(400);
+    expect(body.error).toBe('invalid_amount');
+  });
+
+  it('does not call the price provider for a ZEC request', async () => {
+    await create({ amount: '25' });
+    expect(priceProvider.calls).toBe(0);
   });
 });
 

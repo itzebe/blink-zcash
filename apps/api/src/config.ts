@@ -43,6 +43,17 @@ const schema = z.object({
   ZCASH_RPC_PASSWORD: z.string().optional().default(''),
 
   BLINK_CONFIRMATIONS_REQUIRED: z.coerce.number().int().min(0).default(1),
+
+  /**
+   * Live ZEC/USD price source used to convert USD-denominated requests into the
+   * ZEC amount that ZIP 321 carries. `none` disables USD requests.
+   */
+  BLINK_PRICE_PROVIDER: z.enum(['none', 'coinmarketcap']).default('none'),
+  /** CoinMarketCap API key. Server-side only; never exposed to the browser. */
+  COINMARKETCAP_API_KEY: z.string().optional().default(''),
+  BLINK_PRICE_CACHE_TTL_MS: z.coerce.number().int().min(0).default(60_000),
+  BLINK_PRICE_TIMEOUT_MS: z.coerce.number().int().positive().default(5_000),
+
   BLINK_RATE_LIMIT_MAX: z.coerce.number().int().positive().default(120),
   BLINK_RATE_LIMIT_WINDOW_MS: z.coerce.number().int().positive().default(60_000),
   BLINK_ALLOWED_ORIGINS: z.string().default('http://localhost:3000'),
@@ -85,6 +96,13 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
   }
   if (parsed.BLINK_VERIFICATION_PROVIDER === 'node-rpc' && !parsed.ZCASH_RPC_URL) {
     throw new Error('BLINK_VERIFICATION_PROVIDER=node-rpc requires ZCASH_RPC_URL');
+  }
+
+  // USD-denominated requests need a live price source. If the operator selects
+  // CoinMarketCap, the key must be present or every USD request would fail at
+  // runtime; refuse at startup so the misconfiguration is obvious.
+  if (parsed.BLINK_PRICE_PROVIDER === 'coinmarketcap' && !parsed.COINMARKETCAP_API_KEY) {
+    throw new Error('BLINK_PRICE_PROVIDER=coinmarketcap requires COINMARKETCAP_API_KEY');
   }
 
   return {
