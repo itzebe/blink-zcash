@@ -60,18 +60,23 @@ export default function ReceiptPage({ params }: { params: Promise<{ shortCode: s
 
   return (
     <Shell>
-      <TopBar network={receipt?.network === 'mainnet' ? 'mainnet' : 'testnet'} />
+      <TopBar network={receipt ? receipt.network : null} />
       <div className="stack">
         <div className="stack stack--sm center">
           {receipt ? (
-            <div className="success-mark" aria-hidden="true">
-              ✓
-            </div>
-          ) : null}
-          <p className="kicker">
-            {receipt ? `Receipt · ${purposeLabel(receipt.purpose)}` : 'Proof of payment'}
-          </p>
-          <h1>Payment complete</h1>
+            <>
+              <div className="success-mark" aria-hidden="true">
+                ✓
+              </div>
+              <p className="kicker">Receipt · {purposeLabel(receipt.purpose)}</p>
+              <h1>Payment complete</h1>
+            </>
+          ) : (
+            <>
+              <p className="kicker">Proof of payment</p>
+              <h1>Receipt</h1>
+            </>
+          )}
         </div>
 
         {loading ? <p className="lede">Loading receipt…</p> : null}

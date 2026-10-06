@@ -197,7 +197,7 @@ export interface Receipt {
   /** Everyday workflow this request belongs to. */
   purpose: PaymentPurpose;
   memo: string | null;
-  network: string;
+  network: 'testnet' | 'mainnet';
   privacy: PrivacyCapability;
   status: string;
   txid: string | null;
