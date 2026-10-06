@@ -133,13 +133,38 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
   // `auto` chain. `auto` itself is a resilient chain that prefers CoinMarketCap
   // when a key is configured (so a deployment that provisions the key actually
   // uses it) and otherwise falls back to the keyless sources, without ever
-  // inventing a price. Selecting CoinMarketCap without a key is refused at
-  // startup so the failure is obvious rather than surfacing as a 503 on the
-  // first USD request.
+  // inventing a price.
   const hasCmcKey = parsed.COINMARKETCAP_API_KEY.length > 0;
-  const priceProvider = parsed.BLINK_PRICE_PROVIDER ?? (hasCmcKey ? 'coinmarketcap' : 'auto');
+  let priceProvider = parsed.BLINK_PRICE_PROVIDER ?? (hasCmcKey ? 'coinmarketcap' : 'auto');
   if (priceProvider === 'coinmarketcap' && !hasCmcKey) {
-    throw new Error('BLINK_PRICE_PROVIDER=coinmarketcap requires COINMARKETCAP_API_KEY');
+    if (isProduction) {
+      // Never take the whole API down (ZEC requests must keep working) over a
+      // missing price key. Disable USD instead; /health reports
+      // `priceProvider: none` and USD requests fail with an explicit 503. Adding
+      // the key turns USD back on with no redeploy of code.
+      priceProvider = 'none';
+    } else {
+      // A developer asking for CoinMarketCap with no key is a misconfiguration;
+      // fail loudly so it is fixed rather than silently ignored.
+      throw new Error('BLINK_PRICE_PROVIDER=coinmarketcap requires COINMARKETCAP_API_KEY');
+    }
+  }
+
+  // A real mainnet deployment must price USD requests from the configured,
+  // authoritative source, or not price them at all. Refuse to run mainnet in
+  // production with a keyless or `auto` price provider, so a mainnet USD request
+  // can never be silently priced from an unconfigured source. `none` is allowed:
+  // it disables USD requests (they return 503) while ZEC requests keep working.
+  if (
+    isProduction &&
+    parsed.ZCASH_NETWORK === 'mainnet' &&
+    priceProvider !== 'coinmarketcap' &&
+    priceProvider !== 'none'
+  ) {
+    throw new Error(
+      'Mainnet requires BLINK_PRICE_PROVIDER=coinmarketcap (with COINMARKETCAP_API_KEY) ' +
+        `or none; refusing to price USD requests from "${priceProvider}"`,
+    );
   }
 
   return {

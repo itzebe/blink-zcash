@@ -103,7 +103,31 @@ Rust checks used in CI: `cargo fmt --all -- --check`,
   CoinGecko); `none` disables USD
   with a 503 while ZEC still works; `coinmarketcap` needs
   `COINMARKETCAP_API_KEY`, server-side only, never returned by the API). Never
-  let a failed conversion fall through as a ZEC amount.
+  let a failed conversion fall through as a ZEC amount. On mainnet in production
+  the provider MUST be `coinmarketcap` (with a key) or `none`; the API refuses to
+  boot with a keyless provider so a mainnet USD request is never priced from an
+  unconfigured source. A missing `COINMARKETCAP_API_KEY` in production degrades
+  to `none` (USD requests 503) rather than crashing the API, so ZEC keeps
+  working; adding the key re-enables USD with no code redeploy.
+- **CoinMarketCap integration is shape-sensitive.** The live v3 Quotes Latest
+  endpoint returns `data` as an ARRAY and `quote` as an ARRAY of per-currency
+  quotes; the code also accepts the legacy id-keyed object shape. The provider
+  asserts the entry is ZEC (id `1437`, NOT `328` which is Monero) and the quote
+  is USD, and refuses otherwise. Tests use the real array shape — a fabricated
+  object payload previously hid the wrong id and an AttributeError on live data.
+
+## Deployment
+
+- Production services (Render): `blink-web-bgkz`, `blink-api-j75b`,
+  `blink-engine-4em8` on `*.onrender.com`. They auto-deploy from `main`. The
+  `render.yaml` blueprint names the services `blink-web`/`blink-api`/
+  `blink-engine`, so the live names carry a Render-appended suffix.
+- Production runs **mainnet**: `ZCASH_NETWORK=mainnet` on all three services,
+  mainnet lightwalletd (`https://zec.rocks:443`), and
+  `BLINK_PRICE_PROVIDER=coinmarketcap`. `COINMARKETCAP_API_KEY` is a
+  `sync: false` secret set in the Render Dashboard (never in git).
+- No Render API key is available from the sandbox, so Render actions are done
+  through the blueprint + git auto-deploy, not the Render API.
 
 ## Repo
 

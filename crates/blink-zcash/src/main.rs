@@ -22,7 +22,7 @@ use axum::{
 };
 use serde::{Deserialize, Serialize};
 use tower_http::trace::TraceLayer;
-use tracing::{info, warn};
+use tracing::info;
 
 use blink_zcash::{BlinkNetwork, Error, PaymentSpec};
 
@@ -212,8 +212,11 @@ async fn main() {
 
     let network = match std::env::var("ZCASH_NETWORK") {
         Ok(n) => BlinkNetwork::parse(&n).unwrap_or_else(|e| {
-            warn!("{e}; defaulting to testnet");
-            BlinkNetwork::Testnet
+            // Never silently fall back to a different network: an unrecognised
+            // ZCASH_NETWORK must stop the engine, so a misconfigured production
+            // deployment cannot serve the wrong chain while claiming otherwise.
+            eprintln!("fatal: {e}; refusing to start");
+            std::process::exit(1);
         }),
         Err(_) => BlinkNetwork::Testnet,
     };

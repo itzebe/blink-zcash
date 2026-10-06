@@ -63,10 +63,26 @@ describe('loadConfig verification guardrails', () => {
     expect(() => loadConfig({ ...base, NEXT_PUBLIC_NETWORK: 'mainnet' })).toThrow(/must match/);
   });
 
-  it('refuses coinmarketcap without an API key', () => {
+  it('refuses coinmarketcap without an API key in development', () => {
     expect(() => loadConfig({ ...base, BLINK_PRICE_PROVIDER: 'coinmarketcap' })).toThrow(
       /COINMARKETCAP_API_KEY/,
     );
+  });
+
+  it('degrades to none (not a crash) when production is missing the CMC key', () => {
+    // A missing price key must not take the whole API down (ZEC must keep
+    // working). USD is disabled with an explicit 503 instead.
+    const config = loadConfig({
+      ...base,
+      NODE_ENV: 'production',
+      ZCASH_NETWORK: 'mainnet',
+      NEXT_PUBLIC_NETWORK: 'mainnet',
+      BLINK_ENCRYPTION_KEY: 'a'.repeat(64),
+      BLINK_VERIFICATION_PROVIDER: 'lightwalletd',
+      BLINK_LIGHTWALLETD_URL: 'https://zec.rocks:443',
+      BLINK_PRICE_PROVIDER: 'coinmarketcap',
+    });
+    expect(config.BLINK_PRICE_PROVIDER).toBe('none');
   });
 
   it('accepts coinmarketcap with an API key', () => {
@@ -129,5 +145,46 @@ describe('loadConfig verification guardrails', () => {
   it('accepts the keyless coingecko provider', () => {
     const config = loadConfig({ ...base, BLINK_PRICE_PROVIDER: 'coingecko' });
     expect(config.BLINK_PRICE_PROVIDER).toBe('coingecko');
+  });
+
+  it('refuses mainnet in production without an explicit coinmarketcap price provider', () => {
+    const mainnetBase = {
+      ...base,
+      NODE_ENV: 'production',
+      ZCASH_NETWORK: 'mainnet',
+      NEXT_PUBLIC_NETWORK: 'mainnet',
+      BLINK_ENCRYPTION_KEY: 'a'.repeat(64),
+      BLINK_VERIFICATION_PROVIDER: 'lightwalletd',
+      BLINK_LIGHTWALLETD_URL: 'https://zec.rocks:443',
+    } as unknown as NodeJS.ProcessEnv;
+    // keyless auto chain is refused on mainnet
+    expect(() => loadConfig(mainnetBase)).toThrow(/coinmarketcap/);
+    expect(() => loadConfig({ ...mainnetBase, BLINK_PRICE_PROVIDER: 'coingecko' })).toThrow(
+      /coinmarketcap/,
+    );
+    // explicit coinmarketcap with a key is accepted
+    const ok = loadConfig({
+      ...mainnetBase,
+      BLINK_PRICE_PROVIDER: 'coinmarketcap',
+      COINMARKETCAP_API_KEY: 'k',
+    });
+    expect(ok.BLINK_PRICE_PROVIDER).toBe('coinmarketcap');
+    expect(ok.ZCASH_NETWORK).toBe('mainnet');
+    // `none` is allowed: it disables USD requests but keeps ZEC working
+    expect(loadConfig({ ...mainnetBase, BLINK_PRICE_PROVIDER: 'none' }).BLINK_PRICE_PROVIDER).toBe(
+      'none',
+    );
+  });
+
+  it('allows keyless price providers on testnet even in production', () => {
+    const config = loadConfig({
+      ...base,
+      NODE_ENV: 'production',
+      ZCASH_NETWORK: 'testnet',
+      BLINK_ENCRYPTION_KEY: 'a'.repeat(64),
+      BLINK_VERIFICATION_PROVIDER: 'lightwalletd',
+      BLINK_LIGHTWALLETD_URL: 'https://testnet.zec.rocks:443',
+    });
+    expect(config.BLINK_PRICE_PROVIDER).toBe('auto');
   });
 });

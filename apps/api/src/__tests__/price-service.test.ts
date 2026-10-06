@@ -22,12 +22,30 @@ function jsonResponse(body: unknown, status = 200): Response {
   });
 }
 
+// The live v3 Quotes Latest endpoint returns `data` as an ARRAY and `quote` as
+// an ARRAY of per-currency quotes; id 1437 is Zcash (id 328 is Monero). The
+// tests use that exact shape so a regression cannot pass against a fabricated
+// payload the real API never returns.
 function cmcPayload(price: number, lastUpdated = '2026-01-01T00:00:00.000Z') {
   return {
     status: { error_code: 0 },
+    data: [
+      {
+        id: 1437,
+        symbol: 'ZEC',
+        quote: [{ id: 2781, symbol: 'USD', price, last_updated: lastUpdated }],
+      },
+    ],
+  };
+}
+
+/** The legacy id-keyed object shape, which must also still be understood. */
+function cmcObjectPayload(price: number, lastUpdated = '2026-01-01T00:00:00.000Z') {
+  return {
+    status: { error_code: 0 },
     data: {
-      '328': {
-        id: 328,
+      '1437': {
+        id: 1437,
         symbol: 'ZEC',
         quote: { USD: { price, last_updated: lastUpdated } },
       },
@@ -63,6 +81,54 @@ describe('CoinMarketCapPriceProvider', () => {
     ) as unknown as typeof fetch;
     const price = await makeProvider(fetchImpl).getZecUsdPrice();
     expect(price.price).toBe('0.12345678');
+  });
+
+  it('also understands the legacy id-keyed object response shape', async () => {
+    const fetchImpl = vi.fn(async () =>
+      jsonResponse(cmcObjectPayload(41.5)),
+    ) as unknown as typeof fetch;
+    const price = await makeProvider(fetchImpl).getZecUsdPrice();
+    expect(price.price).toBe('41.5');
+  });
+
+  it('requests the Zcash id (1437), not the old Monero id', async () => {
+    const fetchImpl = vi.fn(async (url: string) => {
+      expect(String(url)).toContain('id=1437');
+      expect(String(url)).not.toContain('id=328');
+      return jsonResponse(cmcPayload(40));
+    }) as unknown as typeof fetch;
+    await makeProvider(fetchImpl).getZecUsdPrice();
+    expect(fetchImpl).toHaveBeenCalledOnce();
+  });
+
+  it('rejects a response whose entry is not ZEC (guards against a wrong id)', async () => {
+    // id 328 is Monero: if the request id regresses, the entry will not be ZEC
+    // and the provider must refuse rather than report Monero's price as ZEC.
+    const fetchImpl = vi.fn(async () =>
+      jsonResponse({
+        data: [
+          {
+            id: 328,
+            symbol: 'XMR',
+            quote: [{ symbol: 'USD', price: 560.47, last_updated: '2026-01-01T00:00:00.000Z' }],
+          },
+        ],
+      }),
+    ) as unknown as typeof fetch;
+    await expect(makeProvider(fetchImpl).getZecUsdPrice()).rejects.toMatchObject({
+      code: 'bad_response',
+    });
+  });
+
+  it('rejects a response with no USD quote', async () => {
+    const fetchImpl = vi.fn(async () =>
+      jsonResponse({
+        data: [{ id: 1437, symbol: 'ZEC', quote: [{ symbol: 'EUR', price: 1200 }] }],
+      }),
+    ) as unknown as typeof fetch;
+    await expect(makeProvider(fetchImpl).getZecUsdPrice()).rejects.toMatchObject({
+      code: 'bad_response',
+    });
   });
 
   it('sends the API key server-side in the request header, never in the URL', async () => {
@@ -291,6 +357,25 @@ describe('createZecUsdPriceProvider', () => {
     expect(provider.name).toBe('coinmarketcap');
   });
 
+  it('does not silently fall through when coinmarketcap is explicitly selected', async () => {
+    // Explicit coinmarketcap must fail clearly on an invalid key, not substitute
+    // a keyless price: the operator asked for CoinMarketCap specifically.
+    const fetchImpl = vi.fn(async () => jsonResponse({}, 401)) as unknown as typeof fetch;
+    const provider = createZecUsdPriceProvider(
+      {
+        BLINK_PRICE_PROVIDER: 'coinmarketcap',
+        COINMARKETCAP_API_KEY: 'bad',
+        BLINK_PRICE_CACHE_TTL_MS: 0,
+        BLINK_PRICE_TIMEOUT_MS: 1000,
+      },
+      { fetchImpl },
+    );
+    await expect(provider.getZecUsdPrice()).rejects.toMatchObject({ code: 'unauthorized' });
+    // Only the CoinMarketCap endpoint was contacted; no keyless source was tried.
+    expect(fetchImpl).toHaveBeenCalledOnce();
+    expect(String((fetchImpl.mock.calls[0] as unknown[])[0])).toContain('pro-api.coinmarketcap.com');
+  });
+
   it('builds a keyless CoinGecko provider when selected', () => {
     const provider = createZecUsdPriceProvider({
       BLINK_PRICE_PROVIDER: 'coingecko',
@@ -326,9 +411,7 @@ describe('createZecUsdPriceProvider', () => {
     // that provisions the key actually uses it (not a keyless source).
     const fetchImpl = vi.fn(async (url: string) => {
       expect(String(url)).toContain('pro-api.coinmarketcap.com');
-      return jsonResponse({
-        data: { '328': { quote: { USD: { price: 42, last_updated: '2026-01-01T00:00:00.000Z' } } } },
-      });
+      return jsonResponse(cmcPayload(42));
     }) as unknown as typeof fetch;
     const provider = createZecUsdPriceProvider(
       {

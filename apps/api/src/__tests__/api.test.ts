@@ -558,6 +558,83 @@ describe('payment lifecycle', () => {
   });
 });
 
+describe('mainnet network isolation', () => {
+  let mainBuilt: BuiltApp;
+  let mainProvider: StubProvider;
+
+  beforeAll(async () => {
+    const config = loadConfig({
+      ...baseEnv,
+      ZCASH_NETWORK: 'mainnet',
+      NEXT_PUBLIC_NETWORK: 'mainnet',
+    });
+    mainProvider = new StubProvider();
+    mainBuilt = await buildApp({ config, provider: mainProvider });
+    await mainBuilt.app.ready();
+  });
+
+  afterAll(async () => {
+    await mainBuilt.app.close();
+  });
+
+  beforeEach(async () => {
+    mainProvider.next = null;
+    await mainBuilt.db.delete(paymentRequests);
+  });
+
+  async function createMain(overrides: Record<string, unknown> = {}) {
+    const res = await mainBuilt.app.inject({
+      method: 'POST',
+      url: '/v1/payment-requests',
+      payload: {
+        recipientName: 'Mainnet Recipient',
+        recipientAddress: MAIN_TRANSPARENT,
+        amount: '1.5',
+        expiryMinutes: 30,
+        ...overrides,
+      },
+    });
+    return { status: res.statusCode, body: res.json() };
+  }
+
+  it('health reports mainnet', async () => {
+    const res = await mainBuilt.app.inject({ url: '/health' });
+    expect(res.json().network).toBe('mainnet');
+  });
+
+  it('accepts a mainnet address and builds a mainnet ZIP 321 URI', async () => {
+    const { status, body } = await createMain();
+    expect(status).toBe(201);
+    expect(body.zip321Uri).toMatch(/^zcash:t1/);
+    expect(body.zip321Uri).toContain('amount=1.5');
+    expect(body.request.network).toBe('mainnet');
+  });
+
+  it('rejects a testnet address on a mainnet deployment', async () => {
+    const { status, body } = await createMain({ recipientAddress: TEST_SAPLING });
+    expect(status).toBe(400);
+    expect(['invalid_address', 'invalid_network']).toContain(body.error);
+    expect(body.message).toMatch(/testnet/i);
+  });
+
+  it('never confirms a mainnet request from an unobserved txid', async () => {
+    const { body } = await createMain();
+    await mainBuilt.app.inject({
+      method: 'POST',
+      url: `/v1/payment-requests/${body.shortCode}/transactions`,
+      payload: { txid: 'a'.repeat(64) },
+    });
+    mainProvider.next = null;
+    const verify = await mainBuilt.app.inject({
+      method: 'POST',
+      url: `/v1/payment-requests/${body.shortCode}/verify`,
+      payload: {},
+    });
+    expect(verify.json().verification.observed).toBe(false);
+    expect(verify.json().request.status).not.toBe('CONFIRMED');
+  });
+});
+
 describe('GET /health', () => {
   it('reports the configured network and provider', async () => {
     const res = await built.app.inject({ url: '/health' });
