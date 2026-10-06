@@ -8,6 +8,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import {
   CoinMarketCapPriceProvider,
+  CoinGeckoPriceProvider,
   PriceUnavailableError,
   createZecUsdPriceProvider,
 } from '../services/price-service.js';
@@ -133,6 +134,79 @@ describe('CoinMarketCapPriceProvider', () => {
   });
 });
 
+describe('CoinGeckoPriceProvider', () => {
+  function geckoPayload(usd: number, lastUpdatedAt = 1767225600) {
+    return { zcash: { usd, last_updated_at: lastUpdatedAt } };
+  }
+  function makeGecko(fetchImpl: typeof fetch, overrides: Record<string, unknown> = {}) {
+    return new CoinGeckoPriceProvider({ cacheTtlMs: 0, fetchImpl, ...overrides });
+  }
+
+  it('normalizes a valid ZEC/USD response and timestamp', async () => {
+    const fetchImpl = vi.fn(async () =>
+      jsonResponse(geckoPayload(1365.99)),
+    ) as unknown as typeof fetch;
+    const price = await makeGecko(fetchImpl).getZecUsdPrice();
+    expect(price).toEqual({
+      provider: 'coingecko',
+      asset: 'ZEC',
+      quote: 'USD',
+      price: '1365.99',
+      observedAt: new Date(1767225600 * 1000).toISOString(),
+    });
+  });
+
+  it('needs no API key and sends no authorization header', async () => {
+    const fetchImpl = vi.fn(async (url: string, init?: RequestInit) => {
+      expect(String(url)).toContain('/api/v3/simple/price');
+      expect(String(url)).toContain('ids=zcash');
+      const headers = (init?.headers ?? {}) as Record<string, string>;
+      expect(Object.keys(headers)).toEqual(['accept']);
+      return jsonResponse(geckoPayload(40));
+    }) as unknown as typeof fetch;
+    await makeGecko(fetchImpl).getZecUsdPrice();
+    expect(fetchImpl).toHaveBeenCalledOnce();
+  });
+
+  it('throws (never fabricates) on a malformed payload', async () => {
+    const fetchImpl = vi.fn(async () => jsonResponse({})) as unknown as typeof fetch;
+    await expect(makeGecko(fetchImpl).getZecUsdPrice()).rejects.toMatchObject({
+      code: 'bad_response',
+    });
+  });
+
+  it('rejects zero and negative prices', async () => {
+    for (const bad of [0, -1]) {
+      const fetchImpl = vi.fn(async () =>
+        jsonResponse(geckoPayload(bad)),
+      ) as unknown as typeof fetch;
+      await expect(makeGecko(fetchImpl).getZecUsdPrice()).rejects.toMatchObject({
+        code: 'invalid_price',
+      });
+    }
+  });
+
+  it('maps HTTP failures to typed errors', async () => {
+    for (const [status, code] of [
+      [429, 'rate_limited'],
+      [500, 'provider_error'],
+    ] as Array<[number, string]>) {
+      const fetchImpl = vi.fn(async () => jsonResponse({}, status)) as unknown as typeof fetch;
+      await expect(makeGecko(fetchImpl).getZecUsdPrice()).rejects.toMatchObject({ code });
+    }
+  });
+
+  it('caches a successful observation', async () => {
+    const fetchImpl = vi.fn(async () =>
+      jsonResponse(geckoPayload(40)),
+    ) as unknown as typeof fetch;
+    const provider = makeGecko(fetchImpl, { cacheTtlMs: 60_000 });
+    await provider.getZecUsdPrice();
+    await provider.getZecUsdPrice();
+    expect(fetchImpl).toHaveBeenCalledOnce();
+  });
+});
+
 describe('createZecUsdPriceProvider', () => {
   it('returns a disabled provider when the provider is none', async () => {
     const provider = createZecUsdPriceProvider({
@@ -152,5 +226,15 @@ describe('createZecUsdPriceProvider', () => {
       BLINK_PRICE_TIMEOUT_MS: 1000,
     });
     expect(provider.name).toBe('coinmarketcap');
+  });
+
+  it('builds a keyless CoinGecko provider when selected', () => {
+    const provider = createZecUsdPriceProvider({
+      BLINK_PRICE_PROVIDER: 'coingecko',
+      COINMARKETCAP_API_KEY: '',
+      BLINK_PRICE_CACHE_TTL_MS: 0,
+      BLINK_PRICE_TIMEOUT_MS: 1000,
+    });
+    expect(provider.name).toBe('coingecko');
   });
 });

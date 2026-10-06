@@ -134,6 +134,23 @@ export const PRICE_DECIMALS = 8;
 const PRICE_SCALE = 100_000_000n; // 10^PRICE_DECIMALS
 
 /**
+ * The zatoshi amount BLINK asks a payer for when settling a USD request.
+ *
+ * USD almost never converts to an exact whole number of zatoshis, so the exact
+ * quotient is rounded UP to the next zatoshi. This guarantees the request asks
+ * for at least the USD-equivalent value; the over-ask is strictly less than one
+ * zatoshi (1e-8 ZEC). Rounding down would under-ask the payer.
+ */
+export function settleUsdToZatoshis(conversion: UsdToZecConversion): bigint {
+  return conversion.rounded ? conversion.zatoshis + 1n : conversion.zatoshis;
+}
+
+/** Canonical ZEC amount BLINK settles a USD request in (see {@link settleUsdToZatoshis}). */
+export function settledZecAmount(conversion: UsdToZecConversion): string {
+  return formatZatoshisToZec(settleUsdToZatoshis(conversion));
+}
+
+/**
  * Parse a positive decimal ZEC/USD price into an integer scaled by 1e8.
  *
  * Prices legitimately carry more than two decimals, so this is deliberately

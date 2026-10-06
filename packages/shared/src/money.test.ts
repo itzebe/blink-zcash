@@ -11,6 +11,8 @@ import {
   parseUsdPrice,
   formatUsdPrice,
   convertUsdToZec,
+  settleUsdToZatoshis,
+  settledZecAmount,
 } from './money.js';
 
 describe('parseZecToZatoshis', () => {
@@ -130,5 +132,29 @@ describe('convertUsdToZec', () => {
 
   it('rejects an amount that converts to zero ZEC', () => {
     expect(() => convertUsdToZec('0.01', '100000000')).toThrow(InvalidAmountError);
+  });
+});
+
+describe('settledZecAmount / settleUsdToZatoshis', () => {
+  it('leaves an exact conversion unchanged', () => {
+    const c = convertUsdToZec('25', '40'); // 0.625 ZEC exactly
+    expect(c.rounded).toBe(false);
+    expect(settleUsdToZatoshis(c)).toBe(62_500_000n);
+    expect(settledZecAmount(c)).toBe('0.625');
+  });
+
+  it('rounds UP to the next zatoshi when the quotient is not whole', () => {
+    const c = convertUsdToZec('25', '40.25'); // floor 62_111_801, remainder != 0
+    expect(c.rounded).toBe(true);
+    expect(settleUsdToZatoshis(c)).toBe(62_111_802n);
+    expect(settledZecAmount(c)).toBe('0.62111802');
+  });
+
+  it('never under-asks for a realistic high ZEC price', () => {
+    const c = convertUsdToZec('1', '1367.43');
+    expect(settledZecAmount(c)).toBe('0.0007313');
+    // strictly at least the floored (USD-equivalent) value
+    expect(settleUsdToZatoshis(c) >= c.zatoshis).toBe(true);
+    expect(settleUsdToZatoshis(c) - c.zatoshis < 2n).toBe(true);
   });
 });

@@ -37,8 +37,8 @@ export interface ZecUsdPriceProvider {
 }
 
 export interface PriceProviderOptions {
-  /** CoinMarketCap API key. Empty means "not configured". */
-  apiKey: string;
+  /** CoinMarketCap API key. Empty/absent means "not configured". */
+  apiKey?: string;
   /** Provider id to report. Defaults to "coinmarketcap". */
   provider?: string;
   /** How long a successful observation may be reused, in ms. */
@@ -54,6 +54,16 @@ export interface PriceProviderOptions {
 const CMC_BASE_URL = 'https://pro-api.coinmarketcap.com';
 /** CoinMarketCap id for Zcash. */
 const ZEC_ID = '328';
+const COINGECKO_BASE_URL = 'https://api.coingecko.com';
+/** CoinGecko id for Zcash. */
+const COINGECKO_ID = 'zcash';
+
+/** Parse an optional provider timestamp into a canonical ISO string. */
+function parseTimestamp(value: unknown): string | null {
+  if (typeof value !== 'string') return null;
+  const parsed = Date.parse(value);
+  return Number.isNaN(parsed) ? null : new Date(parsed).toISOString();
+}
 
 /**
  * Normalize a provider-supplied price into a canonical decimal string.
@@ -73,55 +83,42 @@ function normalizePrice(value: unknown): string {
 }
 
 /**
- * CoinMarketCap ZEC/USD price provider.
- *
- * Uses the Quotes Latest endpoint (`/v3/cryptocurrency/quotes/latest`) with
- * `id=328` (Zcash) and `convert=USD`.
+ * Shared machinery for HTTP price providers: caching, request timeouts, and
+ * mapping transport/HTTP failures to {@link PriceUnavailableError}. Subclasses
+ * supply the request (URL + headers) and the payload extractor.
  */
-export class CoinMarketCapPriceProvider implements ZecUsdPriceProvider {
-  readonly name: string;
-  private readonly apiKey: string;
-  private readonly cacheTtlMs: number;
-  private readonly timeoutMs: number;
-  private readonly fetchImpl: typeof fetch;
-  private readonly now: () => number;
+abstract class HttpPriceProvider implements ZecUsdPriceProvider {
+  abstract readonly name: string;
+  protected readonly cacheTtlMs: number;
+  protected readonly timeoutMs: number;
+  protected readonly fetchImpl: typeof fetch;
+  protected readonly now: () => number;
   private cache: { price: ZecUsdPrice; expiresAt: number } | null = null;
 
   constructor(options: PriceProviderOptions) {
-    this.name = options.provider ?? 'coinmarketcap';
-    this.apiKey = options.apiKey.trim();
     this.cacheTtlMs = options.cacheTtlMs ?? 60_000;
     this.timeoutMs = options.timeoutMs ?? 5_000;
     this.fetchImpl = options.fetchImpl ?? fetch;
     this.now = options.now ?? (() => Date.now());
   }
 
-  async getZecUsdPrice(): Promise<ZecUsdPrice> {
-    if (!this.apiKey) {
-      throw new PriceUnavailableError(
-        'COINMARKETCAP_API_KEY is not configured; cannot obtain a live ZEC/USD price',
-        'not_configured',
-      );
-    }
+  /** Provider-specific request: the URL and any authentication headers. */
+  protected abstract request(): { url: string; headers: Record<string, string> };
+  /** Provider-specific payload decoding. */
+  protected abstract extract(payload: unknown): ZecUsdPrice;
 
+  async getZecUsdPrice(): Promise<ZecUsdPrice> {
     const cached = this.cache;
     if (cached && cached.expiresAt > this.now()) return cached.price;
 
-    const url = `${CMC_BASE_URL}/v3/cryptocurrency/quotes/latest?id=${ZEC_ID}&convert=USD`;
+    const { url, headers } = this.request();
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), this.timeoutMs);
     let res: Response;
     try {
-      res = await this.fetchImpl(url, {
-        method: 'GET',
-        headers: {
-          'X-CMC_PRO_API_KEY': this.apiKey,
-          accept: 'application/json',
-        },
-        signal: controller.signal,
-      });
+      res = await this.fetchImpl(url, { method: 'GET', headers, signal: controller.signal });
     } catch (err) {
-      // Never surface the key or the raw URL: only a short, safe message.
+      // Never surface credentials or the raw URL: only a short, safe message.
       const reason = err instanceof Error ? err.message : String(err);
       throw new PriceUnavailableError(`price provider unreachable: ${reason}`, 'unreachable');
     } finally {
@@ -149,9 +146,43 @@ export class CoinMarketCapPriceProvider implements ZecUsdPriceProvider {
     this.cache = { price: observation, expiresAt: this.now() + this.cacheTtlMs };
     return observation;
   }
+}
+
+/**
+ * CoinMarketCap ZEC/USD price provider.
+ *
+ * Uses the Quotes Latest endpoint (`/v3/cryptocurrency/quotes/latest`) with
+ * `id=328` (Zcash) and `convert=USD`. Requires a server-side API key.
+ */
+export class CoinMarketCapPriceProvider extends HttpPriceProvider {
+  readonly name: string;
+  private readonly apiKey: string;
+
+  constructor(options: PriceProviderOptions) {
+    super(options);
+    this.name = options.provider ?? 'coinmarketcap';
+    this.apiKey = (options.apiKey ?? '').trim();
+  }
+
+  override async getZecUsdPrice(): Promise<ZecUsdPrice> {
+    if (!this.apiKey) {
+      throw new PriceUnavailableError(
+        'COINMARKETCAP_API_KEY is not configured; cannot obtain a live ZEC/USD price',
+        'not_configured',
+      );
+    }
+    return super.getZecUsdPrice();
+  }
+
+  protected request(): { url: string; headers: Record<string, string> } {
+    return {
+      url: `${CMC_BASE_URL}/v3/cryptocurrency/quotes/latest?id=${ZEC_ID}&convert=USD`,
+      headers: { 'X-CMC_PRO_API_KEY': this.apiKey, accept: 'application/json' },
+    };
+  }
 
   /** Pull the ZEC/USD price out of a CoinMarketCap Quotes Latest payload. */
-  private extract(payload: unknown): ZecUsdPrice {
+  protected extract(payload: unknown): ZecUsdPrice {
     const data =
       payload && typeof payload === 'object'
         ? (payload as { data?: Record<string, unknown> }).data
@@ -167,14 +198,44 @@ export class CoinMarketCapPriceProvider implements ZecUsdPriceProvider {
     }
 
     const price = normalizePrice((usd as { price?: unknown }).price);
+    const observedAt = parseTimestamp((usd as { last_updated?: unknown }).last_updated);
 
-    const rawTimestamp = (usd as { last_updated?: unknown }).last_updated;
-    let observedAt: string | null = null;
-    if (typeof rawTimestamp === 'string') {
-      const parsed = Date.parse(rawTimestamp);
-      if (!Number.isNaN(parsed)) observedAt = new Date(parsed).toISOString();
+    return { provider: this.name, asset: 'ZEC', quote: 'USD', price, observedAt };
+  }
+}
+
+/**
+ * CoinGecko ZEC/USD price provider.
+ *
+ * Uses the public `simple/price` endpoint. It needs no API key, so a deployment
+ * can offer USD-denominated requests without provisioning a secret. The public
+ * tier is rate-limited; every failure is surfaced as an error, never a
+ * fabricated price.
+ */
+export class CoinGeckoPriceProvider extends HttpPriceProvider {
+  readonly name = 'coingecko';
+
+  protected request(): { url: string; headers: Record<string, string> } {
+    return {
+      url: `${COINGECKO_BASE_URL}/api/v3/simple/price?ids=${COINGECKO_ID}&vs_currencies=usd&include_last_updated_at=true`,
+      headers: { accept: 'application/json' },
+    };
+  }
+
+  /** Pull the ZEC/USD price out of a CoinGecko simple/price payload. */
+  protected extract(payload: unknown): ZecUsdPrice {
+    const entry =
+      payload && typeof payload === 'object'
+        ? (payload as Record<string, { usd?: unknown; last_updated_at?: unknown }>)[COINGECKO_ID]
+        : undefined;
+    if (!entry || typeof entry !== 'object') {
+      throw new PriceUnavailableError('price provider response did not contain ZEC', 'bad_response');
     }
-
+    const price = normalizePrice(entry.usd);
+    const observedAt =
+      typeof entry.last_updated_at === 'number' && Number.isFinite(entry.last_updated_at)
+        ? new Date(entry.last_updated_at * 1000).toISOString()
+        : null;
     return { provider: this.name, asset: 'ZEC', quote: 'USD', price, observedAt };
   }
 }
@@ -191,7 +252,7 @@ class DisabledPriceProvider implements ZecUsdPriceProvider {
 }
 
 export interface PriceConfig {
-  BLINK_PRICE_PROVIDER: 'none' | 'coinmarketcap';
+  BLINK_PRICE_PROVIDER: 'none' | 'coinmarketcap' | 'coingecko';
   COINMARKETCAP_API_KEY: string;
   BLINK_PRICE_CACHE_TTL_MS: number;
   BLINK_PRICE_TIMEOUT_MS: number;
@@ -201,13 +262,16 @@ export function createZecUsdPriceProvider(
   config: PriceConfig,
   overrides: Partial<PriceProviderOptions> = {},
 ): ZecUsdPriceProvider {
-  if (config.BLINK_PRICE_PROVIDER !== 'coinmarketcap') {
-    return new DisabledPriceProvider();
-  }
-  return new CoinMarketCapPriceProvider({
-    apiKey: config.COINMARKETCAP_API_KEY,
+  const shared = {
     cacheTtlMs: config.BLINK_PRICE_CACHE_TTL_MS,
     timeoutMs: config.BLINK_PRICE_TIMEOUT_MS,
     ...overrides,
-  });
+  };
+  if (config.BLINK_PRICE_PROVIDER === 'coinmarketcap') {
+    return new CoinMarketCapPriceProvider({ apiKey: config.COINMARKETCAP_API_KEY, ...shared });
+  }
+  if (config.BLINK_PRICE_PROVIDER === 'coingecko') {
+    return new CoinGeckoPriceProvider(shared);
+  }
+  return new DisabledPriceProvider();
 }

@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
-import { convertUsdToZec } from '@blink/shared';
+import { convertUsdToZec, settledZecAmount } from '@blink/shared';
 import { Shell, TopBar, Alert } from '@/components/Shell';
 import { BlinkPaymentCard } from '@/components/BlinkPaymentCard';
 import { api, ApiError, type CreatedPaymentRequest } from '@/lib/api';
@@ -22,7 +22,7 @@ type RequestCurrency = 'USD' | 'ZEC';
 function previewZec(usd: string, price: string | null): string | null {
   if (!price || !usd.trim()) return null;
   try {
-    return convertUsdToZec(usd.trim(), price).zec;
+    return settledZecAmount(convertUsdToZec(usd.trim(), price));
   } catch {
     return null;
   }

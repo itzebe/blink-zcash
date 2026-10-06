@@ -79,7 +79,22 @@ describe('loadConfig verification guardrails', () => {
     expect(config.COINMARKETCAP_API_KEY).toBe('test-key');
   });
 
-  it('defaults the price provider to none', () => {
-    expect(loadConfig(base).BLINK_PRICE_PROVIDER).toBe('none');
+  it('auto-selects the keyless coingecko provider when no key is present', () => {
+    expect(loadConfig(base).BLINK_PRICE_PROVIDER).toBe('coingecko');
+  });
+
+  it('auto-selects CoinMarketCap when a key is present and no provider is set', () => {
+    expect(loadConfig({ ...base, COINMARKETCAP_API_KEY: 'k' }).BLINK_PRICE_PROVIDER).toBe(
+      'coinmarketcap',
+    );
+  });
+
+  it('accepts an explicit none to disable USD requests', () => {
+    expect(loadConfig({ ...base, BLINK_PRICE_PROVIDER: 'none' }).BLINK_PRICE_PROVIDER).toBe('none');
+  });
+
+  it('accepts the keyless coingecko provider', () => {
+    const config = loadConfig({ ...base, BLINK_PRICE_PROVIDER: 'coingecko' });
+    expect(config.BLINK_PRICE_PROVIDER).toBe('coingecko');
   });
 });
