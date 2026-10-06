@@ -12,6 +12,7 @@ import {
   ALLOWED_EXPIRY_MINUTES,
   MAX_MEMO_BYTES,
   convertUsdToZec,
+  settledZecAmount,
   formatZatoshisToZec,
   normaliseUsdAmount,
   parseZecToZatoshis,
@@ -287,16 +288,13 @@ export class PaymentService {
       );
     }
 
-    // USD almost never converts to a whole number of zatoshis (1 ZEC = 1e8
-    // zatoshis). Round UP to the next zatoshi so the request always asks for at
-    // least the USD-equivalent value; the difference is < 1 zatoshi (1e-8 ZEC).
-    // Never round down, which would under-ask the payer, and never round the
-    // amount to a whole ZEC (the USD input must not be mistaken for ZEC).
-    const settledZatoshis = conversion.rounded ? conversion.zatoshis + 1n : conversion.zatoshis;
-
+    // USD almost never converts to a whole number of zatoshis. `settledZecAmount`
+    // rounds UP to the next zatoshi so the request always asks for at least the
+    // USD-equivalent value (over-ask < 1 zatoshi), never rounds down, and never
+    // collapses the amount to the raw USD figure.
     return {
       currency,
-      zecAmount: formatZatoshisToZec(settledZatoshis),
+      zecAmount: settledZecAmount(conversion),
       usdAmount: conversion.usd,
       zecUsdPrice: conversion.price,
       priceProvider: price.provider,
