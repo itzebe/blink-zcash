@@ -192,6 +192,22 @@ describe('CoinMarketCapPriceProvider', () => {
     });
   });
 
+  it('aborts a hung request at the configured timeout and reports it as unreachable', async () => {
+    // A provider that never resolves: only the timeout can end the request.
+    const fetchImpl = vi.fn(
+      (_url: string, init?: RequestInit) =>
+        new Promise<Response>((_resolve, reject) => {
+          const signal = init?.signal as AbortSignal | undefined;
+          signal?.addEventListener('abort', () =>
+            reject(Object.assign(new Error('This operation was aborted'), { name: 'AbortError' })),
+          );
+        }),
+    ) as unknown as typeof fetch;
+    await expect(
+      makeProvider(fetchImpl, { timeoutMs: 20 }).getZecUsdPrice(),
+    ).rejects.toMatchObject({ code: 'unreachable' });
+  });
+
   it('rejects a non-JSON body', async () => {
     const fetchImpl = vi.fn(
       async () => new Response('<html>', { status: 200 }),

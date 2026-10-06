@@ -648,6 +648,28 @@ describe('GET /health', () => {
     expect(res.statusCode).toBe(200);
     expect(res.json().network).toBe('testnet');
     expect(res.json().verificationProvider).toBe('none');
+    // Presence-only diagnostic: never the key value, just whether one is loaded.
+    expect(res.json().priceKeyConfigured).toBe(false);
+  });
+
+  it('reports priceKeyConfigured true when a CoinMarketCap key is loaded', async () => {
+    const config = loadConfig({
+      ...baseEnv,
+      ZCASH_NETWORK: 'mainnet',
+      NEXT_PUBLIC_NETWORK: 'mainnet',
+      BLINK_PRICE_PROVIDER: 'coinmarketcap',
+      COINMARKETCAP_API_KEY: 'x'.repeat(32),
+    });
+    expect(config.BLINK_PRICE_PROVIDER).toBe('coinmarketcap');
+    const app = await buildApp({ config, provider: new StubProvider() });
+    await app.app.ready();
+    try {
+      const res = await app.app.inject({ url: '/health' });
+      expect(res.json().priceProvider).toBe('coinmarketcap');
+      expect(res.json().priceKeyConfigured).toBe(true);
+    } finally {
+      await app.app.close();
+    }
   });
 });
 
