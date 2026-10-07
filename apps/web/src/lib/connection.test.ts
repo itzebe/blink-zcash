@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import {
   ConnectionMonitor,
+  PROBE_TIMEOUT_MS,
   RECHECK_READY_MS,
   SLOW_AFTER_ATTEMPTS,
   probeNetwork,
@@ -175,6 +176,82 @@ describe('ConnectionMonitor', () => {
     m.retryNow();
     await vi.advanceTimersByTimeAsync(0);
     expect(fetchImpl.mock.calls.length).toBeGreaterThan(before);
+  });
+
+  it('stays responsive and never errors or mismatches while the API is unavailable', async () => {
+    // A genuinely unavailable backend (transport failure) must only ever yield
+    // `connecting`: the app keeps rendering and retrying. It must not become a
+    // mismatch or a hard error, and payment stays locked.
+    const m = monitor(fetchSequence([{ throw: true }]));
+    m.start();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(m.getState().kind).toBe('connecting');
+
+    m.subscribe((s) => {
+      expect(s.kind === 'mismatch').toBe(false);
+    });
+    // Keep failing across several backoff cycles; still just connecting.
+    for (let i = 0; i < SLOW_AFTER_ATTEMPTS + 2; i++) {
+      await vi.advanceTimersByTimeAsync(retryDelayMs(i + 1));
+      expect(m.getState().kind).toBe('connecting');
+    }
+  });
+
+  it('recovers automatically, without a reload, once the API becomes available', async () => {
+    const fetchImpl = fetchSequence([
+      { throw: true },
+      { http: 502 },
+      { kind: 'ready', network: 'mainnet' },
+    ]);
+    const m = monitor(fetchImpl);
+    m.start();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(m.getState().kind).toBe('connecting');
+    await vi.advanceTimersByTimeAsync(retryDelayMs(1));
+    expect(m.getState().kind).toBe('connecting');
+    await vi.advanceTimersByTimeAsync(retryDelayMs(2));
+    expect(m.getState()).toEqual({ kind: 'ready', network: 'mainnet' });
+  });
+
+  it('bounds a hung backend with a timeout and retries instead of hanging forever', async () => {
+    // A backend that accepts the request but never answers (a stalled socket).
+    // fetch stays pending until its signal aborts; the monitor must then treat
+    // it as a retry, not sit in `connecting` forever with inFlight stuck true.
+    let calls = 0;
+    const fetchImpl = vi.fn(
+      (_input: string, init?: { signal?: AbortSignal }) =>
+        new Promise<never>((_resolve, reject) => {
+          calls += 1;
+          init?.signal?.addEventListener('abort', () => reject(new DOMException('aborted', 'AbortError')));
+        }),
+    );
+    const m = new ConnectionMonitor({ fetchImpl: fetchImpl as never, baseUrl: '', buildNetwork: 'mainnet' });
+    m.start();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(m.getState().kind).toBe('connecting');
+    expect(calls).toBe(1);
+
+    // The probe times out; the monitor records a failure and schedules a retry.
+    await vi.advanceTimersByTimeAsync(PROBE_TIMEOUT_MS);
+    // The next attempt fires after the first backoff (~1s), proving the timer
+    // was scheduled rather than being permanently blocked by a hung fetch.
+    await vi.advanceTimersByTimeAsync(retryDelayMs(1));
+    expect(calls).toBeGreaterThan(1);
+    expect(m.getState().kind).toBe('connecting');
+  });
+
+  it('does not unlock payment (ready) from a timed-out probe', async () => {
+    const fetchImpl = vi.fn(
+      (_input: string, init?: { signal?: AbortSignal }) =>
+        new Promise<never>((_resolve, reject) => {
+          init?.signal?.addEventListener('abort', () => reject(new DOMException('aborted', 'AbortError')));
+        }),
+    );
+    const m = new ConnectionMonitor({ fetchImpl: fetchImpl as never, baseUrl: '', buildNetwork: 'mainnet' });
+    m.start();
+    await vi.advanceTimersByTimeAsync(0);
+    await vi.advanceTimersByTimeAsync(PROBE_TIMEOUT_MS + retryDelayMs(1));
+    expect(m.getState().kind).not.toBe('ready');
   });
 
   it('unsubscribes listeners cleanly', async () => {

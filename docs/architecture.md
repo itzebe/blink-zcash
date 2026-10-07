@@ -131,6 +131,7 @@ impossible for a client to forge a confirmation.
 | Method | Path | Purpose |
 | --- | --- | --- |
 | `GET` | `/health` | Liveness: service, network and provider status. Never checks dependencies |
+| `GET` | `/health/keepalive` | Minimal liveness ping for an external uptime monitor. Returns `{ "status": "ok" }`; does no database, engine, price or payment work and claims no network readiness |
 | `GET` | `/ready` | Readiness: 200 `ready` once the database and the Rust engine answer, else 503 `starting`. An operational probe (Render, keep-warm), not a browser call |
 | `POST` | `/v1/payment-requests` | Create a request |
 | `GET` | `/v1/payment-requests/:shortCode` | Public view (no raw address) |

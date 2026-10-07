@@ -96,8 +96,21 @@ CREATE TABLE IF NOT EXISTS sessions (
 CREATE UNIQUE INDEX IF NOT EXISTS sessions_token_hash_idx ON sessions (token_hash);
 `;
 
+/** Bound on connecting/querying so the start command can never hang forever. */
+const MIGRATION_CONNECTION_TIMEOUT_MS = 15_000;
+const MIGRATION_STATEMENT_TIMEOUT_MS = 30_000;
+
 export async function migrate(connectionString: string): Promise<void> {
-  const client = new pg.Client({ connectionString });
+  const client = new pg.Client({
+    connectionString,
+    // The API start command runs this before `server.js`. Without a bound, an
+    // unreachable database (a cold Render Free instance, a Neon cold start)
+    // would hang the whole boot, so the HTTP server would never listen and every
+    // request — including liveness — would fail. Bound both the connect and the
+    // statement so a dead database fails fast and loudly instead of hanging.
+    connectionTimeoutMillis: MIGRATION_CONNECTION_TIMEOUT_MS,
+    statement_timeout: MIGRATION_STATEMENT_TIMEOUT_MS,
+  });
   await client.connect();
   try {
     await client.query(DDL);

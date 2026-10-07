@@ -10,6 +10,18 @@ name: Keep warm
 # (non-blocking connection strip, retried engine calls). For production, move the
 # services to a paid plan so they never spin down.
 #
+# The API ping targets `/health/keepalive`, the dedicated, near-zero-cost
+# liveness endpoint. It touches no database, no engine, no price source and no
+# payment logic, so a monitor can call it freely. NEVER point the monitor at a
+# payment endpoint.
+#
+# GitHub's scheduler can be delayed under load, so for a hackathon demo ALSO
+# configure an external uptime monitor against the same endpoint at a 5 minute
+# interval (see "Uptime monitoring" in README.md). Neither mechanism keeps the
+# free service permanently on by itself; together they shrink the idle window to
+# almost nothing. External uptime monitoring is required to prevent Render Free
+# from idling the API.
+#
 # The repository is public, so GitHub Actions minutes are free here.
 #
 # Service names carry a Render-appended suffix. Override the URLs with repository
@@ -53,6 +65,9 @@ jobs:
             echo "$name: $out"
           }
 
+          # Primary wake + the recommended uptime-monitor target: cheapest
+          # possible liveness ping, no dependencies, no payment logic.
+          ping "api /health/keepalive" "$API_URL/health/keepalive" || true
           # The API's /ready pings the Rust engine and the database, so this one
           # request warms the API and the engine together. /health is the
           # liveness fallback for deployments that predate /ready.

@@ -1133,6 +1133,80 @@ describe('GET /ready', () => {
   });
 });
 
+describe('payment is gated on a real network observation', () => {
+  // The safety rule that must never regress: an unknown or unverified network
+  // keeps a payment unconfirmed. Only a real provider observation at the
+  // required confirmation depth may confirm it. The keep-alive endpoint cannot
+  // influence any of this.
+
+  async function createAndClaim() {
+    const { body } = await create();
+    const code = body.shortCode;
+    const txid = 'f'.repeat(64);
+    await built.app.inject({
+      method: 'POST',
+      url: `/v1/payment-requests/${code}/transactions`,
+      payload: { txid },
+    });
+    return { code, txid };
+  }
+
+  it('stays unconfirmed while the network is unknown (provider observes nothing)', async () => {
+    const { code } = await createAndClaim();
+    provider.next = null; // no observation => network state is unknown
+    const verify = (
+      await built.app.inject({ method: 'POST', url: `/v1/payment-requests/${code}/verify`, payload: {} })
+    ).json();
+    expect(verify.verification.observed).toBe(false);
+    expect(verify.request.status).not.toBe('CONFIRMED');
+    // No receipt is issued for an unconfirmed payment.
+    const receipt = await built.app.inject({ url: `/v1/payment-requests/${code}/receipt` });
+    expect(receipt.statusCode).toBe(409);
+  });
+
+  it('confirms only after a real observation meets the confirmation threshold', async () => {
+    const { code, txid } = await createAndClaim();
+    provider.next = { txid, confirmations: 1, broadcast: true, source: 'stub' };
+    const verify = (
+      await built.app.inject({ method: 'POST', url: `/v1/payment-requests/${code}/verify`, payload: {} })
+    ).json();
+    expect(verify.verification.observed).toBe(true);
+    expect(verify.request.status).toBe('CONFIRMED');
+    const receipt = await built.app.inject({ url: `/v1/payment-requests/${code}/receipt` });
+    expect(receipt.statusCode).toBe(200);
+  });
+
+  it('does not confirm below the required confirmation depth', async () => {
+    const { code, txid } = await createAndClaim();
+    // Broadcast but not yet mined to depth 1: observed, but not confirmed.
+    provider.next = { txid, confirmations: 0, broadcast: true, source: 'stub' };
+    const verify = (
+      await built.app.inject({ method: 'POST', url: `/v1/payment-requests/${code}/verify`, payload: {} })
+    ).json();
+    expect(verify.verification.observed).toBe(true);
+    expect(verify.request.status).not.toBe('CONFIRMED');
+    const receipt = await built.app.inject({ url: `/v1/payment-requests/${code}/receipt` });
+    expect(receipt.statusCode).toBe(409);
+  });
+
+  it('is never unlocked by hitting the keep-alive endpoint', async () => {
+    const { code } = await createAndClaim();
+    // Ping keep-alive as much as a monitor would.
+    for (let i = 0; i < 5; i++) {
+      const ka = await built.app.inject({ url: '/health/keepalive' });
+      expect(ka.statusCode).toBe(200);
+    }
+    // Keep-alive says only "process alive"; it cannot stand in for a network
+    // observation, so the payment remains unconfirmed.
+    provider.next = null;
+    const verify = (
+      await built.app.inject({ method: 'POST', url: `/v1/payment-requests/${code}/verify`, payload: {} })
+    ).json();
+    expect(verify.verification.observed).toBe(false);
+    expect(verify.request.status).not.toBe('CONFIRMED');
+  });
+});
+
 describe('engine error classification', () => {
   /** An engine stub that throws exactly what a test asks it to throw. */
   class ThrowingEngine implements ZcashEngine {
