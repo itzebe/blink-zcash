@@ -269,11 +269,12 @@ All configuration is via the environment; nothing is hard-coded. See
 | Variable | Purpose |
 | --- | --- |
 | `ZCASH_NETWORK` | `testnet` (default) or `mainnet` |
-| `NEXT_PUBLIC_NETWORK` | must match `ZCASH_NETWORK` |
+| `NEXT_PUBLIC_NETWORK` | the network this web build expects; the app compares it against the API's authoritative `ZCASH_NETWORK` at runtime and hard-stops on a real disagreement |
 | `DATABASE_URL` | PostgreSQL connection string. Required in production; the API refuses to start without it rather than fall back to the localhost default |
 | `APP_BASE_URL` | public web base for share links |
 | `BLINK_ENCRYPTION_KEY` | 32-byte hex; encrypts addresses at rest; required in production |
 | `BLINK_ZCASH_SERVICE_URL` | URL of the Rust engine |
+| `BLINK_ZCASH_TIMEOUT_MS` | per-call timeout for the Rust engine (default `10000`). Must exceed the engine's cold-start time, or a waking engine becomes a spurious failure |
 | `BLINK_VERIFICATION_PROVIDER` | `none` (default), `node-rpc`, or `lightwalletd` |
 | `BLINK_LIGHTWALLETD_URL` | lightwalletd gRPC endpoint; required when the provider is `lightwalletd` |
 | `BLINK_CONFIRMATIONS_REQUIRED` | confirmations before a payment reads `CONFIRMED` (default `1`) |
@@ -442,6 +443,14 @@ Full detail: [`SECURITY.md`](SECURITY.md) and
 - **Expiry is a BLINK-layer concept.** A BLINK request expiring does not make a
   blockchain transaction impossible; it only stops BLINK from presenting it as
   payable.
+- **The free hosting tier spins services down when idle.** The first request
+  after a quiet period waits tens of seconds for a cold start. BLINK tolerates
+  this instead of failing: the web app renders immediately, shows a non-blocking
+  status strip, and unlocks payments only once the API confirms the network; the
+  API retries transient engine failures and reports `engine_unavailable` (503)
+  rather than mislabelling a valid address as invalid. A keep-warm workflow
+  (`.github/workflows/keep-warm.yml`) pings the services on a schedule to shrink
+  the window. A paid plan removes it entirely.
 - **No wallet auto-detection yet.** "Pay with Zcash" uses the ZIP 321 URI and a
   wallet handoff; deep links into specific wallets are roadmap work.
 - **Privacy depends on the recipient's pool, and BLINK says which.** A shielded
@@ -451,8 +460,12 @@ Full detail: [`SECURITY.md`](SECURITY.md) and
 - **Mainnet is live; mainnet payments are real money.** The deployed services
   (see `render.yaml`) run mainnet with a real lightwalletd verification provider
   and the CoinMarketCap price source. Mainnet is opt-in: a production API refuses
-  to start without a verification provider, and the web app hard-stops if its
-  build-time `NEXT_PUBLIC_NETWORK` disagrees with the API's `ZCASH_NETWORK`.
+  to start without a verification provider. The web app does **not** trust its
+  build-time `NEXT_PUBLIC_NETWORK`; it asks the API for its authoritative network
+  at runtime (`/v1/meta/network`). If the two genuinely disagree, it hard-stops
+  rather than transact on the wrong chain. While the API is still starting (the
+  free tier spins down when idle) the app stays usable, shows a non-blocking
+  status strip, and keeps payment controls locked until the network is confirmed.
 - **USD requests need a live price source.** A request may be denominated in USD,
   but ZIP 321 carries ZEC, so the API converts at a live rate. When
   `BLINK_PRICE_PROVIDER` is unset or blank, the API auto-selects CoinMarketCap if

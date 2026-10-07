@@ -26,6 +26,14 @@ const schema = z.object({
   BLINK_ZCASH_SERVICE_URL: z.string().optional().default(''),
 
   /**
+   * Timeout (ms) for a single call to the blink-zcash engine. Must comfortably
+   * exceed the engine's cold-start time: the free Render instance can take ~15s
+   * to boot, and a timeout below that would turn a waking engine into a
+   * spurious failure.
+   */
+  BLINK_ZCASH_TIMEOUT_MS: z.coerce.number().int().positive().default(10_000),
+
+  /**
    * 32-byte key, hex encoded, used to encrypt recipient addresses at rest
    * (AES-256-GCM). Required in production.
    */

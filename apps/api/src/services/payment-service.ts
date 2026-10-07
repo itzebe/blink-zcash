@@ -36,7 +36,7 @@ import type { Database } from '../db/index.js';
 import { paymentEvents, paymentRequests, transactions } from '../db/schema.js';
 import type { Crypto } from '../crypto.js';
 import { generateShortCode, isValidShortCode } from './short-code.js';
-import type { EngineUnavailableError, ZcashEngine } from './zcash-engine.js';
+import { EngineUnavailableError, type ZcashEngine } from './zcash-engine.js';
 import type { VerificationProvider } from './verification-provider.js';
 import { PriceUnavailableError, type ZecUsdPriceProvider } from './price-service.js';
 
@@ -105,6 +105,13 @@ export class PaymentService {
    * Validate a recipient address. Uses the authoritative Rust engine when it is
    * configured, otherwise the local packages. Network mismatch is always a hard
    * error.
+   *
+   * A **definitive** engine rejection (the engine answered and rejected the
+   * address) is a real validation failure. A **transient** engine problem
+   * (timeout, connection error, 5xx — e.g. the engine cold-starting) is retried
+   * a bounded number of times, and if it still cannot be reached the request
+   * fails with `engine_unavailable` (503) rather than reporting a valid address
+   * as invalid.
    */
   private async resolveAddress(
     address: string,
@@ -112,14 +119,22 @@ export class PaymentService {
   ): Promise<{ kind: AddressKind }> {
     if (this.opts.engine.configured) {
       try {
-        const result = await this.opts.engine.inspectAddress(address, network);
+        const result = await this.callEngine(() =>
+          this.opts.engine.inspectAddress(address, network),
+        );
         return { kind: result.value.kind };
       } catch (err) {
-        const message = (err as EngineUnavailableError).message;
+        if (err instanceof EngineUnavailableError && err.reason === 'rejected') {
+          throw new PaymentRequestError(
+            `recipient address rejected: ${err.message}`,
+            'invalid_address',
+            400,
+          );
+        }
         throw new PaymentRequestError(
-          `recipient address rejected: ${message}`,
-          'invalid_address',
-          400,
+          `could not validate the recipient address: ${(err as Error).message}`,
+          'engine_unavailable',
+          503,
         );
       }
     }
@@ -140,6 +155,29 @@ export class PaymentService {
       }
       throw err;
     }
+  }
+
+  /**
+   * Run an engine call, retrying only transient unavailability. A definitive
+   * rejection is returned immediately (it is a verdict, not a hiccup). The
+   * retries absorb a cold-starting engine without ever inventing a result.
+   */
+  private async callEngine<T>(fn: () => Promise<T>, attempts = 3): Promise<T> {
+    let lastError: unknown;
+    for (let attempt = 0; attempt < attempts; attempt++) {
+      try {
+        return await fn();
+      } catch (err) {
+        lastError = err;
+        if (!(err instanceof EngineUnavailableError) || err.reason !== 'unreachable') {
+          throw err;
+        }
+        if (attempt < attempts - 1) {
+          await new Promise((resolve) => setTimeout(resolve, 400 * (attempt + 1)));
+        }
+      }
+    }
+    throw lastError;
   }
 
   private validateMemo(memo: string | null | undefined, kind: AddressKind): string | null {
@@ -169,23 +207,33 @@ export class PaymentService {
   ): Promise<string> {
     if (this.opts.engine.configured) {
       try {
-        const result = await this.opts.engine.buildUri(
-          [
-            {
-              address,
-              amount,
-              ...(memo ? { memo } : {}),
-              ...(label ? { label } : {}),
-              ...(message ? { message } : {}),
-            },
-          ],
-          this.opts.network,
+        const result = await this.callEngine(() =>
+          this.opts.engine.buildUri(
+            [
+              {
+                address,
+                amount,
+                ...(memo ? { memo } : {}),
+                ...(label ? { label } : {}),
+                ...(message ? { message } : {}),
+              },
+            ],
+            this.opts.network,
+          ),
         );
         return result.value;
       } catch (err) {
+        if (err instanceof EngineUnavailableError && err.reason === 'rejected') {
+          throw new PaymentRequestError(
+            `could not build payment request: ${err.message}`,
+            'invalid_payment_request',
+            400,
+          );
+        }
         throw new PaymentRequestError(
           `could not build payment request: ${(err as Error).message}`,
-          'invalid_payment_request',
+          'engine_unavailable',
+          503,
         );
       }
     }

@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { Shell, TopBar, Alert, Row, StatusBadge } from '@/components/Shell';
 import { BlinkPaymentCard } from '@/components/BlinkPaymentCard';
 import { PrivacyPanel } from '@/components/PrivacyPanel';
+import { useConnection } from '@/components/ConnectionProvider';
 import { api, ApiError, type PaymentDetails, type PublicPaymentRequest } from '@/lib/api';
 import { statusLabel, statusTone, statusIsVerified, purposeLabel } from '@/lib/status';
 
@@ -18,9 +19,8 @@ type Phase =
   | { name: 'done' }
   | { name: 'paid' };
 
-const NETWORK = (process.env.NEXT_PUBLIC_NETWORK ?? 'testnet') as 'testnet' | 'mainnet';
-
 export default function PayPage({ params }: { params: Promise<{ shortCode: string }> }) {
+  const { network: connectedNetwork, ready } = useConnection();
   const [shortCode, setShortCode] = useState<string | null>(null);
   const [request, setRequest] = useState<PublicPaymentRequest | null>(null);
   const [details, setDetails] = useState<PaymentDetails | null>(null);
@@ -71,8 +71,11 @@ export default function PayPage({ params }: { params: Promise<{ shortCode: strin
   }, []);
 
   useEffect(() => {
-    if (shortCode) void load(shortCode);
-  }, [shortCode, load]);
+    // Wait until the API has confirmed the network before fetching: this shows a
+    // "connecting" state instead of a hard error while the backend is waking.
+    if (!shortCode || !ready) return;
+    void load(shortCode);
+  }, [shortCode, ready, load]);
 
   // Poll while a transaction is in flight. Polling never invents state: it asks
   // the API, which asks the verification provider.
@@ -163,8 +166,10 @@ export default function PayPage({ params }: { params: Promise<{ shortCode: strin
   if (phase.name === 'loading') {
     return (
       <Shell>
-        <TopBar network={NETWORK} />
-        <p className="lede">Loading payment request…</p>
+        <TopBar network={connectedNetwork} />
+        <p className="lede">
+          {ready ? 'Loading payment request…' : 'Connecting to the BLINK service…'}
+        </p>
       </Shell>
     );
   }
@@ -172,7 +177,7 @@ export default function PayPage({ params }: { params: Promise<{ shortCode: strin
   if (phase.name === 'error' && !request) {
     return (
       <Shell>
-        <TopBar network={NETWORK} />
+        <TopBar network={connectedNetwork} />
         <div className="stack">
           <div className="stack stack--sm">
             <p className="kicker">Payment request</p>
@@ -400,7 +405,12 @@ export default function PayPage({ params }: { params: Promise<{ shortCode: strin
           statusTone={statusTone(request.status)}
           actions={
             <>
-              <button type="button" className="btn btn--primary" onClick={openConfirm}>
+              <button
+                type="button"
+                className="btn btn--primary"
+                onClick={openConfirm}
+                disabled={!ready}
+              >
                 Pay with Zcash
               </button>
               <button
@@ -415,6 +425,9 @@ export default function PayPage({ params }: { params: Promise<{ shortCode: strin
           }
         >
           {notice ? <Alert kind="warn">{notice}</Alert> : null}
+          {!ready ? (
+            <p className="tiny muted">Reconnecting to the BLINK service before you can pay…</p>
+          ) : null}
         </BlinkPaymentCard>
 
         {/* Accurate privacy disclosure: what this route does and does not protect. */}

@@ -5,10 +5,12 @@ import Link from 'next/link';
 import { privacyHeadline } from '@blink/shared';
 import { Shell, TopBar, Alert, Row } from '@/components/Shell';
 import { PrivacyPanel } from '@/components/PrivacyPanel';
+import { useConnection } from '@/components/ConnectionProvider';
 import { api, ApiError, type Receipt } from '@/lib/api';
 import { purposeLabel } from '@/lib/status';
 
 export default function ReceiptPage({ params }: { params: Promise<{ shortCode: string }> }) {
+  const { ready } = useConnection();
   const [shortCode, setShortCode] = useState<string | null>(null);
   const [receipt, setReceipt] = useState<Receipt | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -20,7 +22,9 @@ export default function ReceiptPage({ params }: { params: Promise<{ shortCode: s
   }, [params]);
 
   useEffect(() => {
-    if (!shortCode) return;
+    // Wait until the API has confirmed the network before fetching, so a waking
+    // backend shows a "connecting" state rather than a hard error.
+    if (!shortCode || !ready) return;
     api
       .receipt(shortCode)
       .then((res) => setReceipt(res.receipt))
@@ -28,7 +32,7 @@ export default function ReceiptPage({ params }: { params: Promise<{ shortCode: s
         setError(err instanceof ApiError ? err.message : 'Could not load this receipt.'),
       )
       .finally(() => setLoading(false));
-  }, [shortCode]);
+  }, [shortCode, ready]);
 
   /**
    * Share the receipt link. The receipt is already public (it is fetched from
@@ -79,7 +83,9 @@ export default function ReceiptPage({ params }: { params: Promise<{ shortCode: s
           )}
         </div>
 
-        {loading ? <p className="lede">Loading receipt…</p> : null}
+        {loading ? (
+          <p className="lede">{ready ? 'Loading receipt…' : 'Connecting to the BLINK service…'}</p>
+        ) : null}
         {error ? <Alert kind="error">{error}</Alert> : null}
 
         {receipt ? (

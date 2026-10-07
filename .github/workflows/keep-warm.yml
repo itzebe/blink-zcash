@@ -1,0 +1,62 @@
+name: Keep warm
+
+# Render's free plan spins a service down after ~15 minutes without traffic; the
+# next request then waits tens of seconds for a cold start. That window is what
+# produced intermittent 502s and (before the engine client learned to retry)
+# false `invalid_address` failures on request creation.
+#
+# This job pings the live services on a schedule so they stay warm. It is a
+# mitigation, not a correctness fix: the app itself now tolerates a cold backend
+# (non-blocking connection strip, retried engine calls). For production, move the
+# services to a paid plan so they never spin down.
+#
+# The repository is public, so GitHub Actions minutes are free here.
+#
+# Service names carry a Render-appended suffix. Override the URLs with repository
+# variables (Settings -> Secrets and variables -> Actions -> Variables) if the
+# services are renamed:
+#   vars.BLINK_API_URL, vars.BLINK_WEB_URL, vars.BLINK_ENGINE_URL
+
+on:
+  schedule:
+    # Every 10 minutes. GitHub may delay scheduled runs under load; the interval
+    # is chosen to stay comfortably inside Render's ~15 minute idle window.
+    - cron: '*/10 * * * *'
+  workflow_dispatch:
+
+concurrency:
+  group: keep-warm
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  ping:
+    name: Ping live services
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      API_URL: ${{ vars.BLINK_API_URL || 'https://blink-api-j75b.onrender.com' }}
+      WEB_URL: ${{ vars.BLINK_WEB_URL || 'https://blink-web-bgkz.onrender.com' }}
+      ENGINE_URL: ${{ vars.BLINK_ENGINE_URL || 'https://blink-engine-4em8.onrender.com' }}
+    steps:
+      - name: Wake and check the services
+        run: |
+          # A cold service needs time to boot, so allow a generous timeout and
+          # follow redirects. This job only warms the services; it never fails
+          # the schedule on a single bad response.
+          ping() {
+            local name="$1" url="$2"
+            local out
+            out="$(curl -sS -L --max-time 150 -o /dev/null -w '%{http_code} %{time_total}s' "$url" 2>&1)" || out="curl-error"
+            echo "$name: $out"
+          }
+
+          # The API's /ready pings the Rust engine and the database, so this one
+          # request warms the API and the engine together. /health is the
+          # liveness fallback for deployments that predate /ready.
+          ping "api /ready"    "$API_URL/ready"    || true
+          ping "api /health"   "$API_URL/health"   || true
+          ping "engine /health" "$ENGINE_URL/health" || true
+          ping "web /"         "$WEB_URL/"         || true

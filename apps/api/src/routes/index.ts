@@ -22,6 +22,8 @@ export interface RouteDeps {
   config: import('../config.js').AppConfig;
   /** Live ZEC/USD price source, when configured. Never exposes the API key. */
   priceProvider?: ZecUsdPriceProvider;
+  /** Readiness probe. Absent only in a few unit tests that build routes directly. */
+  readiness?: import('../services/readiness.js').ReadinessChecker;
 }
 
 const createSchema = z.object({
@@ -69,6 +71,23 @@ export async function registerRoutes(app: FastifyInstance, deps: RouteDeps): Pro
     // failing" without exposing the secret.
     priceKeyConfigured: config.COINMARKETCAP_API_KEY.length > 0,
   }));
+
+  /**
+   * Readiness. Distinct from `/health` (liveness): `/health` says the process is
+   * up, `/ready` says the dependencies a request needs are actually usable.
+   *
+   * It returns 503 with `status: "starting"` until the database and the
+   * authoritative Zcash engine answer, and 200 with `status: "ready"` once they
+   * do. The web app polls this to know when it may unlock payment controls. It
+   * never reports `ready` for a dependency it did not actually reach.
+   */
+  app.get('/ready', async (_req, reply) => {
+    if (!deps.readiness) {
+      return reply.code(503).send({ status: 'starting', ready: false, network: config.ZCASH_NETWORK });
+    }
+    const report = await deps.readiness();
+    return reply.code(report.ready ? 200 : 503).send(report);
+  });
 
   /**
    * Current ZEC/USD price, used by the Request screen to preview the conversion.

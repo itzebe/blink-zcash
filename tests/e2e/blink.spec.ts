@@ -229,3 +229,69 @@ test.describe('privacy, payment links and receipts', () => {
     await expect(page.locator('.network-pill')).toHaveText('Zcash');
   });
 });
+
+/**
+ * Cold-start resilience.
+ *
+ * The free hosting tier spins the backend down when idle, so the first request
+ * after a quiet period can take tens of seconds. These tests simulate that
+ * window (a delayed or 502 network probe) and assert the app stays usable and
+ * never mistakes a waking backend for a network mismatch.
+ */
+test.describe('cold-start resilience', () => {
+  const okNetwork = {
+    status: 200,
+    contentType: 'application/json',
+    body: JSON.stringify({ network: 'testnet' }),
+  };
+
+  test('renders the app immediately and shows a non-blocking connecting strip', async ({
+    page,
+  }) => {
+    await page.route('**/v1/meta/network', async (route) => {
+      await new Promise((r) => setTimeout(r, 1500));
+      await route.fulfill(okNetwork);
+    });
+
+    await page.goto('/');
+    // The app is usable from the first paint; the strip is informational only.
+    await expect(page.getByRole('heading', { name: /send money/i })).toBeVisible();
+    await expect(page.locator('.conn')).toBeVisible();
+
+    // Once the API answers, the strip clears and the badge is confirmed.
+    await expect(page.locator('.conn')).toHaveCount(0);
+    await expect(page.locator('.network-pill')).toHaveText('Zcash Testnet');
+  });
+
+  test('a waking backend (502) never shows a network mismatch', async ({ page }) => {
+    let calls = 0;
+    await page.route('**/v1/meta/network', async (route) => {
+      calls += 1;
+      if (calls <= 2) {
+        await route.fulfill({ status: 502, contentType: 'application/json', body: '{}' });
+      } else {
+        await route.fulfill(okNetwork);
+      }
+    });
+
+    await page.goto('/');
+    await expect(page.locator('.conn')).toBeVisible();
+    // A transport failure is not a disagreement about the network.
+    await expect(page.getByText(/not available right now/i)).toHaveCount(0);
+
+    await expect(page.locator('.conn')).toHaveCount(0);
+    await expect(page.locator('.network-pill')).toHaveText('Zcash Testnet');
+  });
+
+  test('payment creation waits for the confirmed network', async ({ page }) => {
+    await page.route('**/v1/meta/network', async (route) => {
+      await new Promise((r) => setTimeout(r, 1500));
+      await route.fulfill(okNetwork);
+    });
+
+    await page.goto('/request');
+    await expect(page.getByRole('button', { name: /connecting/i })).toBeDisabled();
+    await expect(page.getByRole('button', { name: /create payment/i })).toBeEnabled();
+  });
+});
+

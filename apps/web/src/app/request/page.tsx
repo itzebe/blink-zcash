@@ -7,10 +7,9 @@ import { parseAddress } from '@blink/zcash';
 import { Shell, TopBar, Alert } from '@/components/Shell';
 import { BlinkPaymentCard } from '@/components/BlinkPaymentCard';
 import { PrivacyPanel } from '@/components/PrivacyPanel';
+import { useConnection } from '@/components/ConnectionProvider';
 import { api, ApiError, type CreatedPaymentRequest } from '@/lib/api';
 import { purposeLabel } from '@/lib/status';
-
-const NETWORK = (process.env.NEXT_PUBLIC_NETWORK ?? 'testnet') as 'testnet' | 'mainnet';
 
 const EXPIRY_OPTIONS = [
   { value: 10, label: '10 min' },
@@ -122,6 +121,7 @@ function previewPrivacy(address: string, network: 'testnet' | 'mainnet'): Privac
 }
 
 export default function RequestPage() {
+  const { network, ready } = useConnection();
   const [recipientName, setRecipientName] = useState('');
   const [recipientAddress, setRecipientAddress] = useState('');
   const [currency, setCurrency] = useState<RequestCurrency>('ZEC');
@@ -139,7 +139,7 @@ export default function RequestPage() {
   const [created, setCreated] = useState<CreatedPaymentRequest | null>(null);
   const [copied, setCopied] = useState(false);
 
-  const privacyPreview = previewPrivacy(recipientAddress, NETWORK);
+  const privacyPreview = network ? previewPrivacy(recipientAddress, network) : null;
 
   function applyMode(next: UseCaseMode) {
     setMode(next.id);
@@ -154,6 +154,13 @@ export default function RequestPage() {
   // re-fetches the price at creation; this preview is informational.
   useEffect(() => {
     if (currency !== 'USD') {
+      setPrice(null);
+      setPriceError(null);
+      return;
+    }
+    // Don't probe the price while the backend is still waking: that would show a
+    // spurious error. Wait until the network is confirmed.
+    if (!ready) {
       setPrice(null);
       setPriceError(null);
       return;
@@ -176,7 +183,7 @@ export default function RequestPage() {
     return () => {
       cancelled = true;
     };
-  }, [currency]);
+  }, [currency, ready]);
 
   const zecPreview = currency === 'USD' ? previewZec(amount, price) : null;
 
@@ -307,7 +314,7 @@ export default function RequestPage() {
 
   return (
     <Shell>
-      <TopBar network={NETWORK} />
+      <TopBar network={network} />
       <form className="stack" onSubmit={submit}>
         <div className="stack stack--sm">
           <p className="kicker">Request payment</p>
@@ -474,7 +481,9 @@ export default function RequestPage() {
           <input
             id="address"
             className="input input--mono"
-            placeholder={NETWORK === 'mainnet' ? 'u1… or zs1… or t1…' : 'utest… or ztestsapling…'}
+            placeholder={
+              network === 'mainnet' ? 'u1… or zs1… or t1…' : 'utest… or ztestsapling…'
+            }
             autoComplete="off"
             spellCheck={false}
             value={recipientAddress}
@@ -488,9 +497,15 @@ export default function RequestPage() {
           {privacyPreview ? <PrivacyPanel privacy={privacyPreview} compact /> : null}
         </div>
 
-        <button className="btn btn--primary" type="submit" disabled={busy}>
-          {busy ? 'Creating…' : 'Create payment'}
+        <button className="btn btn--primary" type="submit" disabled={busy || !ready}>
+          {busy ? 'Creating…' : !ready ? 'Connecting…' : 'Create payment'}
         </button>
+        {!ready ? (
+          <p className="tiny muted center">
+            Waiting for the BLINK service to confirm the Zcash network before a request can be
+            created.
+          </p>
+        ) : null}
       </form>
       <p className="footer-note">BLINK never asks for your seed phrase or spending key</p>
     </Shell>
