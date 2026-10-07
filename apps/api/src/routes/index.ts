@@ -78,8 +78,11 @@ export async function registerRoutes(app: FastifyInstance, deps: RouteDeps): Pro
    *
    * It returns 503 with `status: "starting"` until the database and the
    * authoritative Zcash engine answer, and 200 with `status: "ready"` once they
-   * do. The web app polls this to know when it may unlock payment controls. It
-   * never reports `ready` for a dependency it did not actually reach.
+   * do. It never reports `ready` for a dependency it did not actually reach.
+   *
+   * This is an operational probe (Render health checks, the keep-warm workflow,
+   * an operator). The web app does not poll it: it confirms the network it needs
+   * to transact through `/v1/meta/network`.
    */
   app.get('/ready', async (_req, reply) => {
     if (!deps.readiness) {
