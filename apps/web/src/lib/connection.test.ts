@@ -177,6 +177,41 @@ describe('ConnectionMonitor', () => {
     expect(fetchImpl.mock.calls.length).toBeGreaterThan(before);
   });
 
+  it('stays responsive and never errors or mismatches while the API is unavailable', async () => {
+    // A genuinely unavailable backend (transport failure) must only ever yield
+    // `connecting`: the app keeps rendering and retrying. It must not become a
+    // mismatch or a hard error, and payment stays locked.
+    const m = monitor(fetchSequence([{ throw: true }]));
+    m.start();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(m.getState().kind).toBe('connecting');
+
+    m.subscribe((s) => {
+      expect(s.kind === 'mismatch').toBe(false);
+    });
+    // Keep failing across several backoff cycles; still just connecting.
+    for (let i = 0; i < SLOW_AFTER_ATTEMPTS + 2; i++) {
+      await vi.advanceTimersByTimeAsync(retryDelayMs(i + 1));
+      expect(m.getState().kind).toBe('connecting');
+    }
+  });
+
+  it('recovers automatically, without a reload, once the API becomes available', async () => {
+    const fetchImpl = fetchSequence([
+      { throw: true },
+      { http: 502 },
+      { kind: 'ready', network: 'mainnet' },
+    ]);
+    const m = monitor(fetchImpl);
+    m.start();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(m.getState().kind).toBe('connecting');
+    await vi.advanceTimersByTimeAsync(retryDelayMs(1));
+    expect(m.getState().kind).toBe('connecting');
+    await vi.advanceTimersByTimeAsync(retryDelayMs(2));
+    expect(m.getState()).toEqual({ kind: 'ready', network: 'mainnet' });
+  });
+
   it('unsubscribes listeners cleanly', async () => {
     const m = monitor(fetchSequence([{ kind: 'ready', network: 'mainnet' }]));
     const listener = vi.fn();

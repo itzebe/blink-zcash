@@ -112,6 +112,19 @@ Rust checks used in CI: `cargo fmt --all -- --check`,
   Render Dashboard env (never `NEXT_PUBLIC_*`, never in source); the CMC request
   sends it in the `X-CMC_PRO_API_KEY` header, never the URL. There is no Render
   API token in this environment, so that env var can only be set in the Dashboard.
+- **`/health/keepalive` is the designated uptime-monitor target.** A minimal
+  liveness ping (`{ "status": "ok" }`, 200) that does NO database, engine,
+  lightwalletd, price or payment work and echoes no config. It is exempt from
+  rate limiting (`allowList` in `server.ts`) so a monitor is never throttled into
+  a false negative. It means only "the process is alive" — never "mainnet
+  verified", never a readiness signal, and it must never unlock payment. Point
+  the external monitor at it at 5 min; never at a payment endpoint. Keep the
+  three concepts separate: liveness (`/health`, `/health/keepalive`), readiness
+  (`/ready`, DB + engine), network verification (`/v1/meta/network` + provider).
+- **External uptime monitoring is required to prevent Render Free from idling
+  the API.** Render Free (and the GitHub keep-warm schedule, which can be delayed)
+  cannot keep the service always-on by itself. Do not add an in-app
+  `setInterval` self-ping loop.
 - **Cold starts are tolerated, not treated as failures.** The free plan spins a
   service down after ~15 min idle; the next request waits tens of seconds.
   `ConnectionMonitor` (`apps/web/src/lib/connection.ts`) probes the API with

@@ -73,6 +73,20 @@ export async function registerRoutes(app: FastifyInstance, deps: RouteDeps): Pro
   }));
 
   /**
+   * Keep-alive. A deliberately minimal liveness ping for an external uptime
+   * monitor (see the keep-warm workflow / README). It returns as soon as the
+   * process answers and touches nothing else: no database, no Zcash engine, no
+   * lightwalletd, no price lookup, no payment logic, no configuration echo.
+   *
+   * It means exactly one thing — "the API process is alive". It is NOT a
+   * readiness or network-verification signal: it never implies the expected
+   * Zcash network has been confirmed, and the frontend never calls it to decide
+   * whether payment is allowed. Payment stays gated on `/v1/meta/network` plus
+   * real provider verification.
+   */
+  app.get('/health/keepalive', async () => ({ status: 'ok' }));
+
+  /**
    * Readiness. Distinct from `/health` (liveness): `/health` says the process is
    * up, `/ready` says the dependencies a request needs are actually usable.
    *

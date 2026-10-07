@@ -109,6 +109,10 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<BuiltApp>
   await app.register(rateLimit, {
     max: config.BLINK_RATE_LIMIT_MAX,
     timeWindow: config.BLINK_RATE_LIMIT_WINDOW_MS,
+    // The keep-alive endpoint is the designated infrastructure ping. It does no
+    // work, so unlimited calls are harmless, and a monitor must never be
+    // throttled into a false negative (which would let the free instance idle).
+    allowList: (req) => req.url.split('?')[0] === '/health/keepalive',
   });
 
   const deps: RouteDeps = { service, config, priceProvider, readiness };

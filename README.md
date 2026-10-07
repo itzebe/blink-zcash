@@ -410,6 +410,51 @@ Serve the API with `node apps/api/dist/server.js` and the web app with
 `DATABASE_URL`, and a configured verification provider if you intend to use
 mainnet.
 
+### Uptime monitoring (Render Free)
+
+Render Free web services spin down after ~15 minutes without inbound traffic, and
+the next request waits tens of seconds for a cold start. BLINK tolerates the cold
+start — the web app renders immediately, shows a non-blocking status strip and
+unlocks payments only once the API confirms the network — but for a hackathon demo
+you want the API warm beforehand.
+
+The API exposes a dedicated, near-zero-cost liveness endpoint for this:
+
+```
+GET https://<BLINK-API-HOST>/health/keepalive
+```
+
+It returns `{ "status": "ok" }` as soon as the process answers. It performs no
+database, Zcash/lightwalletd, price or payment work, exposes no secrets, and is
+exempt from rate limiting so a monitor is never throttled into a false negative.
+It means only "the API process is alive" — it is not a readiness or
+network-verification signal, and it never unlocks payment.
+
+Recommended external monitor configuration:
+
+| Setting | Value |
+| --- | --- |
+| Monitor | BLINK API keepalive endpoint |
+| URL | `https://<BLINK-API-HOST>/health/keepalive` |
+| Method | `GET` |
+| Interval | 5 minutes |
+| Expected | HTTP 200 |
+
+Rules:
+
+- Do NOT put credentials or API keys in the monitor URL or request.
+- Do NOT monitor a payment endpoint (for example anything under
+  `/v1/payment-requests`).
+- Do NOT add an in-app `setInterval` loop to keep the backend awake; the app must
+  not be responsible for keeping its own infrastructure alive.
+
+The `.github/workflows/keep-warm.yml` workflow pings the same endpoint (plus
+`/ready`, `/health` and the engine) every 10 minutes as a backstop, but GitHub's
+scheduler can be delayed under load, so the external monitor at a 5 minute
+interval is the primary mechanism during a demo. **External uptime monitoring is
+required to prevent Render Free from idling the API.** Render Free is not
+inherently always-on.
+
 ## 16. Security model
 
 BLINK is non-custodial and secrets-free by design:
@@ -449,8 +494,11 @@ Full detail: [`SECURITY.md`](SECURITY.md) and
   status strip, and unlocks payments only once the API confirms the network; the
   API retries transient engine failures and reports `engine_unavailable` (503)
   rather than mislabelling a valid address as invalid. A keep-warm workflow
-  (`.github/workflows/keep-warm.yml`) pings the services on a schedule to shrink
-  the window. A paid plan removes it entirely.
+  (`.github/workflows/keep-warm.yml`) and — recommended for a demo — an external
+  uptime monitor ping the dedicated `GET /health/keepalive` endpoint to shrink the
+  window (see §15). A paid plan removes it entirely; **external uptime monitoring
+  is required to prevent Render Free from idling the API**, since the free tier is
+  not inherently always-on.
 - **No wallet auto-detection yet.** "Pay with Zcash" uses the ZIP 321 URI and a
   wallet handoff; deep links into specific wallets are roadmap work.
 - **Privacy depends on the recipient's pool, and BLINK says which.** A shielded
