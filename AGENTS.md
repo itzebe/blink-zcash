@@ -129,13 +129,25 @@ Rust checks used in CI: `cargo fmt --all -- --check`,
   service down after ~15 min idle; the next request waits tens of seconds.
   `ConnectionMonitor` (`apps/web/src/lib/connection.ts`) probes the API with
   backoff (1s → 10s cap) and reports `connecting` until the network is confirmed;
-  it never turns a 502/transport error into a `mismatch`. The API's
+  it never turns a 502/transport error into a `mismatch`. **Each probe is bounded
+  by `PROBE_TIMEOUT_MS` (30s, via an `AbortController`).** Without it a connection
+  that stalls *after* the TCP handshake left the probe pending forever, so
+  `inFlight` never cleared and the retry timer was never scheduled — the UI was
+  stuck on "Connecting…" with no recovery (production incident). A timeout must
+  stay a *retry*, never a `mismatch` and never `ready` (payment stays locked).
+  The API's
   `EngineUnavailableError` carries a `reason` (`unreachable` vs `rejected`): a
   transient engine problem is retried and then reported as
   `engine_unavailable` (503), so a waking engine can never make a valid address
   look invalid; only a real 4xx rejection is `invalid_address`. `BLINK_ZCASH_TIMEOUT_MS`
   (default 10000) must exceed the engine cold-start time. A keep-warm workflow
   (`.github/workflows/keep-warm.yml`) pings `/ready` + `/health` every 10 min.
+- **Every boot-critical I/O is bounded, so a dead dependency fails fast instead
+  of hanging the process.** The pg pool sets `connectionTimeoutMillis` (10s;
+  node-postgres defaults to `0` = wait forever, which would hang `/ready`), and
+  `migrate.ts` sets connect (15s) and statement (30s) timeouts — the start command
+  runs `migrate.js && server.js`, so an unbounded migration would hang boot and
+  the HTTP server (including liveness) would never listen.
 - **Never store a browser global on an instance and call it as a method.** A bare
   `setTimeout` assigned to a field (`this.setTimeoutImpl = setTimeout`) throws
   `Illegal invocation` when invoked as `this.setTimeoutImpl(...)`, because the
