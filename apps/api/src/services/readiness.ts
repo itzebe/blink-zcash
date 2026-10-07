@@ -11,11 +11,12 @@
  *  * **Readiness** (`/ready`) answers "can this process actually serve BLINK
  *    right now?". It checks the dependencies a request needs — the database and
  *    the authoritative Zcash engine — and reports `starting` until they are
- *    usable. The web app uses it to know when to unlock payment controls.
+ *    usable. It is an operational probe (Render health checks, the keep-warm
+ *    workflow, an operator); the web app confirms its network through
+ *    `/v1/meta/network` instead.
  *
  * Readiness never fakes success: an unreachable engine reports `starting`, not
- * `ready`, so the frontend keeps payments locked until the engine genuinely
- * answers.
+ * `ready`, so an operator can tell "still coming up" from "actually serving".
  */
 import { sql } from 'drizzle-orm';
 import type { ZcashNetwork } from '@blink/shared';
