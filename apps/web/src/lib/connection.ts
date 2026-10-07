@@ -28,6 +28,21 @@ export const SLOW_AFTER_ATTEMPTS = 5;
 /** How often to re-confirm the network once the app is running. */
 export const RECHECK_READY_MS = 5 * 60_000;
 
+/**
+ * Hard budget for a single network probe.
+ *
+ * A cold Render Free backend can take tens of seconds to answer, so this is
+ * generous enough to let a waking service reply. It exists so the probe can
+ * NEVER hang indefinitely: without it, a connection that stalls after the TCP
+ * handshake (a half-open socket, a proxy that accepted the request but never
+ * responds) leaves the fetch pending forever, `inFlight` stays true, and the
+ * retry timer is never scheduled — the UI shows "Connecting…" indefinitely
+ * instead of retrying. Bounding the probe guarantees that the worst case is a
+ * `connecting` state followed by another attempt, and that a stalled backend
+ * can never leave the app permanently stuck.
+ */
+export const PROBE_TIMEOUT_MS = 30_000;
+
 export type ConnectionState =
   | { kind: 'connecting'; attempt: number; slow: boolean; reason?: string }
   | { kind: 'ready'; network: ZcashNetwork }
@@ -49,7 +64,10 @@ export type ProbeResult =
   | { kind: 'mismatch'; buildNetwork: string; apiNetwork: ZcashNetwork }
   | { kind: 'retry'; reason: string };
 
-type FetchLike = (input: string, init?: { headers?: Record<string, string> }) => Promise<{
+type FetchLike = (
+  input: string,
+  init?: { headers?: Record<string, string>; signal?: AbortSignal },
+) => Promise<{
   ok: boolean;
   status: number;
   json: () => Promise<unknown>;
@@ -67,10 +85,14 @@ export async function probeNetwork(
   fetchImpl: FetchLike,
   baseUrl: string,
   buildNetwork: '' | ZcashNetwork,
+  signal?: AbortSignal,
 ): Promise<ProbeResult> {
   let res;
   try {
-    res = await fetchImpl(`${baseUrl}/v1/meta/network`, { headers: { accept: 'application/json' } });
+    res = await fetchImpl(`${baseUrl}/v1/meta/network`, {
+      headers: { accept: 'application/json' },
+      ...(signal ? { signal } : {}),
+    });
   } catch {
     return { kind: 'retry', reason: 'the BLINK service could not be reached' };
   }
@@ -202,8 +224,18 @@ export class ConnectionMonitor {
   private async probe(): Promise<void> {
     if (this.stopped || this.paused || this.inFlight) return;
     this.inFlight = true;
+    // Bound the probe so a stalled backend can never leave the monitor waiting
+    // forever (see PROBE_TIMEOUT_MS). The signal aborts the underlying fetch.
+    const controller =
+      typeof AbortController !== 'undefined' ? new AbortController() : null;
+    const timeoutHandle = this.setTimeoutImpl(() => controller?.abort(), PROBE_TIMEOUT_MS);
     try {
-      const result = await probeNetwork(this.opts.fetchImpl, this.opts.baseUrl, this.buildNetwork);
+      const result = await probeNetwork(
+        this.opts.fetchImpl,
+        this.opts.baseUrl,
+        this.buildNetwork,
+        controller?.signal,
+      );
       if (this.stopped) return;
       if (result.kind === 'ready') {
         this.attempt = 0;
@@ -231,6 +263,7 @@ export class ConnectionMonitor {
       });
       this.schedule(retryDelayMs(this.attempt));
     } finally {
+      this.clearTimeoutImpl(timeoutHandle);
       this.inFlight = false;
     }
   }
