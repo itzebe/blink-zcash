@@ -79,3 +79,46 @@ describe('createZcashEngine', () => {
     );
   });
 });
+
+describe('createZcashEngine classification and ping', () => {
+  it('classifies a 4xx engine verdict as a definitive rejection', async () => {
+    const url = await startServer((_req, res) => {
+      res.writeHead(422, { 'content-type': 'application/json' });
+      res.end(JSON.stringify({ error: 'invalid address', kind: 'invalid_address' }));
+    });
+    const engine = createZcashEngine(url);
+    const error = await engine.inspectAddress(ADDRESS, 'mainnet').catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(EngineUnavailableError);
+    expect((error as EngineUnavailableError).reason).toBe('rejected');
+  });
+
+  it('classifies a 5xx as transient (unreachable), not a rejection', async () => {
+    const url = await startServer((_req, res) => {
+      res.writeHead(503, { 'content-type': 'application/json' });
+      res.end(JSON.stringify({ error: 'starting up' }));
+    });
+    const engine = createZcashEngine(url);
+    const error = await engine.inspectAddress(ADDRESS, 'mainnet').catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(EngineUnavailableError);
+    expect((error as EngineUnavailableError).reason).toBe('unreachable');
+  });
+
+  it('pings the engine health endpoint', async () => {
+    const url = await startServer((_req, res) => {
+      res.writeHead(200, { 'content-type': 'application/json' });
+      res.end(JSON.stringify({ status: 'ok', service: 'blink-zcash' }));
+    });
+    const engine = createZcashEngine(url);
+    await expect(engine.ping()).resolves.toBe(true);
+  });
+
+  it('reports ping false when the engine is unreachable', async () => {
+    const engine = createZcashEngine('http://127.0.0.1:1');
+    await expect(engine.ping(300)).resolves.toBe(false);
+  });
+
+  it('reports ping false when no engine is configured', async () => {
+    const engine = createZcashEngine('');
+    await expect(engine.ping()).resolves.toBe(false);
+  });
+});

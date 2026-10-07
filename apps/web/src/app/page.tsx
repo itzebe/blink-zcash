@@ -4,16 +4,18 @@ import { useState } from 'react';
 import Link from 'next/link';
 import { Shell, TopBar } from '@/components/Shell';
 import { BlinkPaymentCard } from '@/components/BlinkPaymentCard';
-
-const NETWORK = (process.env.NEXT_PUBLIC_NETWORK ?? 'testnet') as 'testnet' | 'mainnet';
+import { useConnection } from '@/components/ConnectionProvider';
 
 export default function HomePage() {
+  // The confirmed network, or null until the API answers. The badge shows a
+  // neutral label rather than guessing a network.
+  const { network } = useConnection();
   const [demoAmount, setDemoAmount] = useState('0.25');
   const [demoMemo, setDemoMemo] = useState('Coffee & croissant');
 
   return (
     <Shell>
-      <TopBar network={NETWORK} />
+      <TopBar network={network} />
 
       <div className="stack" style={{ gap: 32 }}>
         <div className="stack stack--sm" style={{ textAlign: 'center' }}>
@@ -35,7 +37,7 @@ export default function HomePage() {
           currency="ZEC"
           memo={demoMemo}
           recipientName="Joseph"
-          network={NETWORK}
+          network={network}
           actions={
             <>
               <Link className="btn btn--primary" href="/request">

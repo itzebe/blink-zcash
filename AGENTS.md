@@ -96,9 +96,14 @@ Rust checks used in CI: `cargo fmt --all -- --check`,
   failures. The API's `BLINK_ALLOWED_ORIGINS` is only a fallback.
 - **Live production (Render).** `blink-web` / `blink-api` / `blink-engine` are the
   services that deploy from `main`. The API reports its effective providers at
-  `/health` and its authoritative network at `/v1/meta/network`; the web app's
-  `NetworkGuard` blocks the whole UI when `NEXT_PUBLIC_NETWORK` disagrees with
-  that. `/health` also exposes `priceKeyConfigured` (a boolean, never the key).
+  `/health` and its authoritative network at `/v1/meta/network`; `/health` also
+  exposes `priceKeyConfigured` (a boolean, never the key). The web app no longer
+  trusts the build-time `NEXT_PUBLIC_NETWORK`: `ConnectionProvider` polls
+  `/v1/meta/network` at runtime and only hard-stops on a **genuine** disagreement
+  (a mis-set env var or a stale build). While the API is still starting it renders
+  the app and a non-blocking status strip, and keeps payment controls locked until
+  the network is confirmed. `/ready` reports readiness (DB + engine) separately
+  from `/health` liveness.
   On mainnet, `BLINK_PRICE_PROVIDER=coinmarketcap` degrades to `none` **only when
   `COINMARKETCAP_API_KEY` is empty in the running process** — the observed
   `priceProvider: none` therefore means the key did not reach the process, not a
@@ -107,10 +112,23 @@ Rust checks used in CI: `cargo fmt --all -- --check`,
   Render Dashboard env (never `NEXT_PUBLIC_*`, never in source); the CMC request
   sends it in the `X-CMC_PRO_API_KEY` header, never the URL. There is no Render
   API token in this environment, so that env var can only be set in the Dashboard.
-- **Engine cold starts on the free plan.** `blink-engine` (free) spins down when
-  idle; the first request can 502 while it wakes, which surfaces as
-  `invalid_address … non-JSON response (HTTP 502)` on request creation. Retry once
-  warm; this is not a code bug.
+- **Cold starts are tolerated, not treated as failures.** The free plan spins a
+  service down after ~15 min idle; the next request waits tens of seconds.
+  `ConnectionMonitor` (`apps/web/src/lib/connection.ts`) probes the API with
+  backoff (1s → 10s cap) and reports `connecting` until the network is confirmed;
+  it never turns a 502/transport error into a `mismatch`. The API's
+  `EngineUnavailableError` carries a `reason` (`unreachable` vs `rejected`): a
+  transient engine problem is retried and then reported as
+  `engine_unavailable` (503), so a waking engine can never make a valid address
+  look invalid; only a real 4xx rejection is `invalid_address`. `BLINK_ZCASH_TIMEOUT_MS`
+  (default 10000) must exceed the engine cold-start time. A keep-warm workflow
+  (`.github/workflows/keep-warm.yml`) pings `/ready` + `/health` every 10 min.
+- **Never store a browser global on an instance and call it as a method.** A bare
+  `setTimeout` assigned to a field (`this.setTimeoutImpl = setTimeout`) throws
+  `Illegal invocation` when invoked as `this.setTimeoutImpl(...)`, because the
+  receiver is the instance, not `window`. This silently killed the connection
+  retry timer (the app stayed "connecting" forever after any failed probe).
+  Always wrap: `(handler, ms) => setTimeout(handler, ms)`.
 - **Memos are plaintext** (stored, shown, and encoded in the ZIP 321 URI). Only
   the recipient address is encrypted at rest. Never claim memos are encrypted.
 - **Local `npm ci` needs `NODE_ENV=development`** (or `--include=dev`); the shell

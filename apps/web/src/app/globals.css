@@ -726,6 +726,62 @@ h2 {
   color: var(--muted);
 }
 
+/* ------------------------------------------------------------------ */
+/* Connection status strip (non-blocking)                            */
+/* ------------------------------------------------------------------ */
+.conn {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 16px;
+  font-size: 13px;
+  color: var(--muted);
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+}
+
+.conn__spinner {
+  width: 13px;
+  height: 13px;
+  border-radius: 50%;
+  border: 2px solid var(--border);
+  border-top-color: var(--accent);
+  animation: connSpin 0.8s linear infinite;
+  flex: none;
+}
+
+.conn__text {
+  flex: 1;
+}
+
+.conn__retry {
+  flex: none;
+  background: none;
+  border: 1px solid var(--border);
+  color: var(--accent);
+  border-radius: 999px;
+  padding: 4px 12px;
+  font-size: 12px;
+  font-family: inherit;
+  cursor: pointer;
+}
+
+.conn__retry:hover {
+  border-color: var(--accent);
+}
+
+@keyframes connSpin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .conn__spinner {
+    animation: none;
+  }
+}
+
 
 /* ------------------------------------------------------------------ */
 /* Details / disclosure                                              */

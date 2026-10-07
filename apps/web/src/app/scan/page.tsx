@@ -4,6 +4,7 @@ import { useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import jsQR from 'jsqr';
 import { Shell, TopBar, Alert, Row } from '@/components/Shell';
+import { useConnection } from '@/components/ConnectionProvider';
 import { parseSinglePayment, Zip321Error } from '@blink/payment-request';
 import { parseAddress, type ParsedAddress } from '@blink/zcash';
 
@@ -20,8 +21,6 @@ type Parsed =
       networkError: string | null;
     };
 
-const NETWORK = (process.env.NEXT_PUBLIC_NETWORK ?? 'testnet') as 'testnet' | 'mainnet';
-
 /**
  * Parse a scanned or pasted payload.
  *
@@ -30,7 +29,7 @@ const NETWORK = (process.env.NEXT_PUBLIC_NETWORK ?? 'testnet') as 'testnet' | 'm
  * the browser for immediate feedback AND again on the server before anything is
  * acted upon.
  */
-function parseInput(raw: string): Parsed {
+function parseInput(raw: string, network: 'testnet' | 'mainnet' | null): Parsed {
   const value = raw.trim();
 
   const blinkMatch = value.match(/\/pay\/([A-Z0-9]{6,32})/i);
@@ -43,8 +42,11 @@ function parseInput(raw: string): Parsed {
   let networkError: string | null = null;
   try {
     parsedAddress = parseAddress(payment.address);
-    if (parsedAddress.network !== NETWORK) {
-      networkError = `This request is for ${parsedAddress.network}, but this app is configured for ${NETWORK}.`;
+    // Only enforce a network mismatch once the API has confirmed which network we
+    // are on. Before that, `network` is null and the check is deferred to the
+    // server, which always validates authoritatively.
+    if (network && parsedAddress.network !== network) {
+      networkError = `This request is for ${parsedAddress.network}, but this app is configured for ${network}.`;
     }
   } catch (err) {
     networkError = err instanceof Error ? err.message : 'Address could not be validated.';
@@ -64,6 +66,7 @@ function parseInput(raw: string): Parsed {
 
 export default function ScanPage() {
   const router = useRouter();
+  const { network } = useConnection();
   const [input, setInput] = useState('');
   const [result, setResult] = useState<Parsed | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -76,7 +79,7 @@ export default function ScanPage() {
     setError(null);
     setResult(null);
     try {
-      const parsed = parseInput(raw);
+      const parsed = parseInput(raw, network);
       if (parsed.kind === 'blink') {
         router.push(`/pay/${parsed.shortCode}`);
         return;
@@ -207,7 +210,7 @@ export default function ScanPage() {
 
   return (
     <Shell>
-      <TopBar network={NETWORK} />
+      <TopBar network={network} />
       <form className="stack" onSubmit={handleParse}>
         <div className="stack stack--sm" style={{ textAlign: 'center' }}>
           <p className="kicker">Check a payment request</p>

@@ -14,6 +14,7 @@ import { buildApp, type BuiltApp } from '../server.js';
 import { loadConfig } from '../config.js';
 import type { Observation, VerificationProvider } from '../services/verification-provider.js';
 import { PriceUnavailableError, type ZecUsdPriceProvider } from '../services/price-service.js';
+import { EngineUnavailableError, type ZcashEngine } from '../services/zcash-engine.js';
 import type { ZecUsdPrice } from '@blink/shared';
 import { paymentRequests } from '../db/schema.js';
 
@@ -1074,5 +1075,135 @@ describe('receipt preserves the original USD snapshot and settlement', () => {
     const receipt = await built.app.inject({ url: `/v1/payment-requests/${code}/receipt` });
     expect(receipt.statusCode).toBe(409);
     expect(receipt.json().error).toBe('not_confirmed');
+  });
+});
+
+describe('GET /ready', () => {
+  it('reports ready with a live database and no engine configured', async () => {
+    const res = await built.app.inject({ url: '/ready' });
+    expect(res.statusCode).toBe(200);
+    const body = res.json();
+    expect(body.status).toBe('ready');
+    expect(body.ready).toBe(true);
+    expect(body.checks.database).toBe(true);
+    // No engine is configured in this suite, so engine readiness is not applicable.
+    expect(body.checks.engine).toBeNull();
+  });
+
+  it('reports starting (503) when the configured engine is unreachable', async () => {
+    const config = loadConfig({
+      ...baseEnv,
+      // A port nothing listens on: the engine ping fails fast.
+      BLINK_ZCASH_SERVICE_URL: 'http://127.0.0.1:1',
+      BLINK_ZCASH_TIMEOUT_MS: '500',
+    });
+    const app = await buildApp({ config, provider: new StubProvider() });
+    await app.app.ready();
+    try {
+      const res = await app.app.inject({ url: '/ready' });
+      expect(res.statusCode).toBe(503);
+      const body = res.json();
+      expect(body.status).toBe('starting');
+      expect(body.ready).toBe(false);
+      expect(body.checks.database).toBe(true);
+      expect(body.checks.engine).toBe(false);
+    } finally {
+      await app.app.close();
+    }
+  });
+
+  it('keeps liveness independent of readiness (health stays ok)', async () => {
+    // Liveness stays independent of readiness: /health is still ok even when the
+    // engine is unreachable, so Render does not restart a healthy process.
+    const config = loadConfig({
+      ...baseEnv,
+      BLINK_ZCASH_SERVICE_URL: 'http://127.0.0.1:1',
+      BLINK_ZCASH_TIMEOUT_MS: '500',
+    });
+    const app = await buildApp({ config, provider: new StubProvider() });
+    await app.app.ready();
+    try {
+      const health = await app.app.inject({ url: '/health' });
+      expect(health.statusCode).toBe(200);
+      expect(health.json().status).toBe('ok');
+      expect(health.json().zcashEngineConfigured).toBe(true);
+    } finally {
+      await app.app.close();
+    }
+  });
+});
+
+describe('engine error classification', () => {
+  /** An engine stub that throws exactly what a test asks it to throw. */
+  class ThrowingEngine implements ZcashEngine {
+    readonly configured = true;
+    constructor(private readonly error: Error) {}
+    async ping() {
+      return false;
+    }
+    async inspectAddress(): Promise<never> {
+      throw this.error;
+    }
+    async buildUri(): Promise<never> {
+      throw this.error;
+    }
+    async decodeTransaction(): Promise<never> {
+      throw this.error;
+    }
+  }
+
+  async function appWithEngine(error: Error) {
+    const config = loadConfig({ ...baseEnv, BLINK_ZCASH_SERVICE_URL: 'https://engine.test' });
+    const app = await buildApp({
+      config,
+      provider: new StubProvider(),
+      engine: new ThrowingEngine(error),
+    });
+    await app.app.ready();
+    return app;
+  }
+
+  const payload = {
+    recipientName: 'Joseph',
+    recipientAddress: TEST_SAPLING,
+    amount: '1',
+    expiryMinutes: 30,
+  };
+
+  it('reports a transient (unreachable) engine as 503, never as an invalid address', async () => {
+    const app = await appWithEngine(
+      new EngineUnavailableError('blink-zcash service unreachable: fetch failed', 'unreachable'),
+    );
+    try {
+      const res = await app.app.inject({
+        method: 'POST',
+        url: '/v1/payment-requests',
+        payload,
+      });
+      // A cold-starting engine must never make a valid address look invalid.
+      expect(res.statusCode).toBe(503);
+      expect(res.json().error).toBe('engine_unavailable');
+    } finally {
+      await app.app.close();
+    }
+  });
+
+  it('reports a definitive (rejected) engine verdict as an invalid address', async () => {
+    const app = await appWithEngine(
+      new EngineUnavailableError('address is for testnet but mainnet was expected', 'rejected'),
+    );
+    try {
+      const res = await app.app.inject({
+        method: 'POST',
+        url: '/v1/payment-requests',
+        payload,
+      });
+      // A real network mismatch stays a hard, non-retryable validation error.
+      expect(res.statusCode).toBe(400);
+      expect(res.json().error).toBe('invalid_address');
+      expect(res.json().message).toMatch(/mainnet/i);
+    } finally {
+      await app.app.close();
+    }
   });
 });

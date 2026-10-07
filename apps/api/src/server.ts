@@ -18,6 +18,7 @@ import {
   type VerificationProvider,
 } from './services/verification-provider.js';
 import { createZecUsdPriceProvider, type ZecUsdPriceProvider } from './services/price-service.js';
+import { createReadinessChecker, type ReadinessChecker } from './services/readiness.js';
 import { registerRoutes, type RouteDeps } from './routes/index.js';
 
 export interface BuildAppOptions {
@@ -37,6 +38,7 @@ export interface BuiltApp {
   config: AppConfig;
   db: Database;
   crypto: Crypto;
+  readiness: ReadinessChecker;
 }
 
 export async function buildApp(options: BuildAppOptions = {}): Promise<BuiltApp> {
@@ -44,7 +46,8 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<BuiltApp>
   const crypto = options.crypto ?? createCrypto(config.BLINK_ENCRYPTION_KEY, config.isProduction);
   const { db, pool } = options.db ? { db: options.db, pool: null } : createDb(config.DATABASE_URL);
 
-  const engine = options.engine ?? createZcashEngine(config.BLINK_ZCASH_SERVICE_URL);
+  const engine =
+    options.engine ?? createZcashEngine(config.BLINK_ZCASH_SERVICE_URL, config.BLINK_ZCASH_TIMEOUT_MS);
   const provider =
     options.provider ??
     createVerificationProvider({
@@ -78,6 +81,12 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<BuiltApp>
     ...(options.generateCode ? { generateCode: options.generateCode } : {}),
   });
 
+  const readiness = createReadinessChecker({
+    db,
+    engine,
+    network: config.ZCASH_NETWORK,
+  });
+
   const app = Fastify({
     logger: {
       level: config.NODE_ENV === 'test' ? 'silent' : 'info',
@@ -102,7 +111,7 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<BuiltApp>
     timeWindow: config.BLINK_RATE_LIMIT_WINDOW_MS,
   });
 
-  const deps: RouteDeps = { service, config, priceProvider };
+  const deps: RouteDeps = { service, config, priceProvider, readiness };
   await registerRoutes(app, deps);
 
   app.setErrorHandler((err: Error, _req, reply) => {
@@ -116,7 +125,7 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<BuiltApp>
     });
   }
 
-  return { app, service, config, db, crypto };
+  return { app, service, config, db, crypto, readiness };
 }
 
 const isDirectRun =

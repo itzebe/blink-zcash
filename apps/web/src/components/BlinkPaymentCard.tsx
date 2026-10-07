@@ -13,7 +13,7 @@ export interface BlinkPaymentCardProps {
   usdAmount?: string | null;
   memo?: string | null;
   recipientName?: string | null;
-  network?: 'testnet' | 'mainnet';
+  network?: 'testnet' | 'mainnet' | null;
   /** Protocol-accurate privacy of this route; shown as the card's status tag. */
   privacy?: PrivacyCapability | null;
   status?: string;
@@ -31,7 +31,7 @@ export function BlinkPaymentCard({
   usdAmount,
   memo,
   recipientName,
-  network = 'testnet',
+  network = null,
   privacy,
   status,
   statusLabel: label,
@@ -42,13 +42,16 @@ export function BlinkPaymentCard({
   children,
 }: BlinkPaymentCardProps) {
   // The tag states the actual privacy of the route when it is known, and the
-  // network otherwise (e.g. the marketing preview). It never claims "protected"
-  // for a transparent recipient.
+  // network otherwise. When the network is not yet confirmed (null) it says
+  // "Zcash" rather than guessing — the preview must never claim a network the
+  // API has not confirmed.
   const tag = privacy
     ? privacyHeadline(privacy)
     : network === 'mainnet'
       ? 'Zcash Mainnet'
-      : 'Zcash Testnet';
+      : network === 'testnet'
+        ? 'Zcash Testnet'
+        : 'Zcash';
   return (
     <div className="payment-card">
       <div className="payment-card__header">
