@@ -25,7 +25,29 @@ const TEST_SAPLING =
   'ztestsapling10yy2ex5dcqkclhc7z7yrnjq2z6feyjad56ptwlfgmy77dmaqqrl9gyhprdx59qgmsnyfska2kez';
 const TEST_UA =
   'utest10c5kutapazdnf8ztl3pu43nkfsjx89fy3uuff8tsmxm6s86j37pe7uz94z5jhkl49pqe8yz75rlsaygexk6jpaxwx0esjr8wm5ut7d5s';
+// A testnet R2 Unified Address whose ONLY receiver is transparent (`tutest…`).
+// The `u…`/`tutest…` prefix must not be treated as proof of a shielded receiver.
+// A genuinely valid 54-byte UA (above the ZIP 316 F4Jumble floor), accepted by
+// the authoritative Rust `zcash_address` crate.
+const TEST_UA_TRANSPARENT_ONLY =
+  'tutest124lwpdn50kcu0ygd9xes9uv77u3rx2arrhgvw0kl7ucfll9hktkrecmdh95d8efalwahtld87wu4phtv7vw8y9g4tx7jy';
+// Testnet R2 Unified Address with BOTH a transparent and an Orchard receiver.
+// A wallet handed this could silently settle into the transparent receiver, so
+// the shielded-only policy must reject it in the primary flow.
+const TEST_UA_MIXED_TRANSPARENT_ORCHARD =
+  'tutest1g8sgu2gqav6mcswxfnha3yg7ajeznk6ykj3as93tnh32yyq56t9d32dxzgw66r5s4dge2gpr4m54ac9djwr4lm550u8ctpw9h6fl9f632j2dvq7cwugf5pyu5eds7gm5rtuxgrez927';
+// Testnet UA with transparent (P2PKH) + Sapling receivers (mixed).
+const TEST_UA_MIXED_TRANSPARENT_SAPLING =
+  'utest1umlnyxwzc6rgz900aax35m4e5f3p2lfexpmsrkdw9mr48mk9m4twgww9xcwmdzvhr7gsp9r8djhhg8q0dgt0rfa3s95az5vq4x983lu2q070avytpcgrs8a99muv7zk3v6nzw8ylk6a';
+// Testnet R0 Unified Address with BOTH shielded receivers (Sapling + Orchard) and
+// no transparent receiver. The canonical shielded-only, memo-capable recipient:
+// the primary flow must accept it.
+const TEST_UA_SAPLING_ORCHARD =
+  'utest1udj294cv9avaz0utlaypnn6cp576nnzm49jq80rutejsq3jqz9pafpy8280hkf73w98n59vr02y37x3x9pzlnmd0m9f0zm7fxjh9humnl4ah77fxjcptakzq29thqhw9gu4n332mlh6868u2g4tsr3pp9qx3nxmsu6ztsaat3u6jhy3k';
 const MAIN_TRANSPARENT = 't1Hsc1LR8yKnbbe3twRp88p6vFfC5t7DLbs';
+// A valid mainnet Sapling (shielded) recipient, derived from the testnet fixture.
+const MAIN_SAPLING =
+  'zs10yy2ex5dcqkclhc7z7yrnjq2z6feyjad56ptwlfgmy77dmaqqrl9gyhprdx59qgmsnyfs72c47k';
 
 const baseEnv = {
   DATABASE_URL,
@@ -36,6 +58,10 @@ const baseEnv = {
   BLINK_ZCASH_SERVICE_URL: '',
   BLINK_VERIFICATION_PROVIDER: 'none',
   BLINK_CONFIRMATIONS_REQUIRED: '1',
+  // The whole suite shares one Fastify instance, so its in-memory rate-limit
+  // counter accumulates across every test. Raise the cap so a new test cannot
+  // tip an unrelated test over the limit; rate limiting is not under test here.
+  BLINK_RATE_LIMIT_MAX: '100000',
 } as unknown as NodeJS.ProcessEnv;
 
 /** A price provider whose result each test sets explicitly. */
@@ -147,14 +173,16 @@ describe('POST /v1/payment-requests', () => {
     expect(body.error).toBe('invalid_amount');
   });
 
-  it('rejects a memo attached to a transparent recipient', async () => {
+  it('rejects a transparent (non-shielded) recipient outright', async () => {
     const TEST_TRANSPARENT = 'tmEZhbWHTpdKMw5it8YDspUXSMGQyFwovpU';
     const { status, body } = await create({
       recipientAddress: TEST_TRANSPARENT,
       memo: 'this memo cannot be attached',
     });
     expect(status).toBe(400);
-    expect(body.error).toBe('memo_unsupported');
+    // A transparent-only recipient is refused before the memo is even considered,
+    // because BLINK is shielded-first and will not accept an openly visible route.
+    expect(body.error).toBe('transparent_recipient');
   });
 
   it('rejects an oversized memo', async () => {
@@ -699,7 +727,7 @@ describe('mainnet network isolation', () => {
       url: '/v1/payment-requests',
       payload: {
         recipientName: 'Mainnet Recipient',
-        recipientAddress: MAIN_TRANSPARENT,
+        recipientAddress: MAIN_SAPLING,
         amount: '1.5',
         expiryMinutes: 30,
         ...overrides,
@@ -713,12 +741,18 @@ describe('mainnet network isolation', () => {
     expect(res.json().network).toBe('mainnet');
   });
 
-  it('accepts a mainnet address and builds a mainnet ZIP 321 URI', async () => {
+  it('accepts a mainnet shielded address and builds a mainnet ZIP 321 URI', async () => {
     const { status, body } = await createMain();
     expect(status).toBe(201);
-    expect(body.zip321Uri).toMatch(/^zcash:t1/);
+    expect(body.zip321Uri).toMatch(/^zcash:zs1/);
     expect(body.zip321Uri).toContain('amount=1.5');
     expect(body.request.network).toBe('mainnet');
+  });
+
+  it('rejects a transparent-only mainnet recipient (shielded-first)', async () => {
+    const { status, body } = await createMain({ recipientAddress: MAIN_TRANSPARENT });
+    expect(status).toBe(400);
+    expect(body.error).toBe('transparent_recipient');
   });
 
   it('rejects a testnet address on a mainnet deployment', async () => {
@@ -745,11 +779,11 @@ describe('mainnet network isolation', () => {
     expect(verify.json().request.status).not.toBe('CONFIRMED');
   });
 
-  it('reports transparent privacy for a mainnet transparent recipient', async () => {
+  it('reports shielded privacy for a mainnet Sapling recipient', async () => {
     const { body } = await createMain();
-    expect(body.request.privacy.recipientKind).toBe('transparent');
-    expect(body.request.privacy.recipient).toBe('public');
-    expect(body.request.privacy.amount).toBe('public');
+    expect(body.request.privacy.recipientKind).toBe('sapling');
+    expect(body.request.privacy.recipient).toBe('protected');
+    expect(body.request.privacy.amount).toBe('protected');
   });
 });
 
@@ -824,7 +858,7 @@ describe('privacy capability', () => {
     expect(JSON.stringify(privacy).toLowerCase()).not.toContain('anonymous');
   });
 
-  it('marks a Unified Address recipient as shielded', async () => {
+  it('marks a Unified Address recipient with a shielded receiver as shielded', async () => {
     const { status, body } = await create({ recipientAddress: TEST_UA, memo: 'x' });
     expect(status).toBe(201);
     expect(body.request.privacy.recipientKind).toBe('unified');
@@ -832,7 +866,54 @@ describe('privacy capability', () => {
     expect(body.request.privacy.supportsMemo).toBe(true);
   });
 
-  it('marks a transparent recipient as fully public', async () => {
+  it('rejects a Unified Address whose only receiver is transparent', async () => {
+    // Fix #1: a `u…` prefix is not shielded. This UA exposes only a transparent
+    // receiver, so the primary payment-request flow must refuse it.
+    const { status, body } = await create({
+      recipientAddress: TEST_UA_TRANSPARENT_ONLY,
+      memo: 'x',
+    });
+    expect(status).toBe(400);
+    expect(body.error).toBe('transparent_recipient');
+  });
+
+  it('accepts a Unified Address exposing both shielded receivers (Sapling + Orchard)', async () => {
+    // Fix #1 (positive): a UA with no transparent receiver and both shielded
+    // receivers is the canonical shielded-only route and must be accepted.
+    const { status, body } = await create({ recipientAddress: TEST_UA_SAPLING_ORCHARD, memo: 'x' });
+    expect(status).toBe(201);
+    expect(body.request.privacy.recipientKind).toBe('unified');
+    expect(body.request.privacy.recipient).toBe('protected');
+    expect(body.request.privacy.supportsMemo).toBe(true);
+  });
+
+  it('rejects a UA payload below the ZIP 316 F4Jumble floor as malformed', async () => {
+    // A 38-byte `tutest…` payload cannot be a validly-encoded UA. The engine/TS
+    // decoder reject it as an invalid address, so it is neither accepted nor
+    // mislabelled as transparent-only.
+    const { status, body } = await create({
+      recipientAddress: 'tutest1cj7gr2vpn260gfgq5pusg3rh4ac4zaqwukzwwh5q0mjtudm4uq0lcq5fqpx4jafqche',
+      memo: 'x',
+    });
+    expect(status).toBe(400);
+    expect(body.error).toBe('invalid_address');
+  });
+
+  it('rejects a mixed Unified Address carrying both shielded and transparent receivers', async () => {
+    // Fix #1 (fail-closed): a UA that exposes a transparent receiver alongside a
+    // shielded one must be refused. A wallet could silently settle into the
+    // transparent receiver, so this cannot be handed out as a shielded route.
+    for (const recipientAddress of [
+      TEST_UA_MIXED_TRANSPARENT_ORCHARD,
+      TEST_UA_MIXED_TRANSPARENT_SAPLING,
+    ]) {
+      const { status, body } = await create({ recipientAddress, memo: 'x' });
+      expect(status).toBe(400);
+      expect(body.error).toBe('transparent_recipient');
+    }
+  });
+
+  it('refuses a transparent recipient rather than marking it public', async () => {
     const config = loadConfig({
       ...baseEnv,
       ZCASH_NETWORK: 'mainnet',
@@ -851,12 +932,9 @@ describe('privacy capability', () => {
           expiryMinutes: 30,
         },
       });
-      const privacy = res.json().request.privacy;
-      expect(privacy.recipientKind).toBe('transparent');
-      expect(privacy.recipient).toBe('public');
-      expect(privacy.amount).toBe('public');
-      expect(privacy.level).toBe('transparent');
-      expect(privacy.supportsMemo).toBe(false);
+      // A shielded-first product does not create transparent-accepting requests.
+      expect(res.statusCode).toBe(400);
+      expect(res.json().error).toBe('transparent_recipient');
     } finally {
       await main.app.close();
     }
@@ -1279,5 +1357,116 @@ describe('engine error classification', () => {
     } finally {
       await app.app.close();
     }
+  });
+});
+
+describe('shielded-payment verification distinguishes pools from public bytes', () => {
+  async function createAndClaim() {
+    const { body } = await create({ recipientAddress: TEST_SAPLING });
+    const code = body.shortCode;
+    const txid = '7'.repeat(64);
+    await built.app.inject({
+      method: 'POST',
+      url: `/v1/payment-requests/${code}/transactions`,
+      payload: { txid },
+    });
+    return { code, txid };
+  }
+
+  it('confirms a shielded settlement as shielded activity while marking recipient/amount unverified', async () => {
+    const { code, txid } = await createAndClaim();
+    provider.next = {
+      txid,
+      confirmations: 3,
+      broadcast: true,
+      source: 'stub',
+      evidence: {
+        txid,
+        size: 1000,
+        pools: { transparent: false, sapling: true, orchard: false, shielded: true },
+        recipientHasTransparent: false,
+        recipientHasShielded: true,
+        transparentRecipientZatoshis: null,
+      },
+    };
+    const verify = await built.app.inject({
+      method: 'POST',
+      url: `/v1/payment-requests/${code}/verify`,
+      payload: {},
+    });
+    expect(verify.json().request.status).toBe('CONFIRMED');
+    expect(verify.json().verification.shielded.state).toBe('shielded_activity_observed');
+    expect(verify.json().verification.shielded.recipientVerified).toBe(false);
+    expect(verify.json().verification.shielded.amountVerified).toBe(false);
+
+    const receipt = (await built.app.inject({ url: `/v1/payment-requests/${code}/receipt` })).json()
+      .receipt;
+    expect(receipt.shieldedVerification.state).toBe('shielded_activity_observed');
+    expect(receipt.statement).toMatch(/cannot name the recipient or amount/i);
+  });
+
+  it('never confirms a settlement that touches no shielded pool (transparent settlement)', async () => {
+    const { code, txid } = await createAndClaim();
+    provider.next = {
+      txid,
+      confirmations: 5,
+      broadcast: true,
+      source: 'stub',
+      evidence: {
+        txid,
+        size: 1000,
+        pools: { transparent: true, sapling: false, orchard: false, shielded: false },
+        recipientHasTransparent: false,
+        recipientHasShielded: true,
+        transparentRecipientZatoshis: null,
+      },
+    };
+    const verify = await built.app.inject({
+      method: 'POST',
+      url: `/v1/payment-requests/${code}/verify`,
+      payload: {},
+    });
+    expect(verify.json().request.status).not.toBe('CONFIRMED');
+    expect(verify.json().verification.shielded.state).toBe('transparent_settlement');
+
+    const receipt = await built.app.inject({ url: `/v1/payment-requests/${code}/receipt` });
+    expect(receipt.statusCode).toBe(409);
+  });
+
+  it('classifies a payment to a shielded-only recipient transparent receiver as contradictory', async () => {
+    const { code, txid } = await createAndClaim();
+    provider.next = {
+      txid,
+      confirmations: 6,
+      broadcast: true,
+      source: 'stub',
+      evidence: {
+        txid,
+        size: 1000,
+        pools: { transparent: true, sapling: true, orchard: false, shielded: true },
+        recipientHasTransparent: true,
+        recipientHasShielded: true,
+        transparentRecipientZatoshis: 25000000,
+      },
+    };
+    const verify = await built.app.inject({
+      method: 'POST',
+      url: `/v1/payment-requests/${code}/verify`,
+      payload: {},
+    });
+    expect(verify.json().request.status).not.toBe('CONFIRMED');
+    expect(verify.json().verification.shielded.state).toBe('contradictory');
+  });
+
+  it('classifies an observation with no decodable evidence as plain observed, not shielded', async () => {
+    const { code, txid } = await createAndClaim();
+    provider.next = { txid, confirmations: 3, broadcast: true, source: 'stub' };
+    const verify = await built.app.inject({
+      method: 'POST',
+      url: `/v1/payment-requests/${code}/verify`,
+      payload: {},
+    });
+    expect(verify.json().verification.shielded.state).toBe('observed');
+    expect(verify.json().verification.shielded.recipientVerified).toBe(false);
   });
 });

@@ -97,6 +97,14 @@ export const paymentRequests = pgTable(
     /** Set only by the verification layer. */
     txid: text('txid'),
     confirmations: integer('confirmations').notNull().default(0),
+    /**
+     * The honest result of shielded-payment verification, written only by the
+     * verification layer. Records what could actually be established from public
+     * transaction bytes (transaction observed, shielded-pool activity observed,
+     * recipient/amount independently verified, or a transparent settlement that
+     * contradicts a shielded request). Never set from a client claim.
+     */
+    shieldedVerification: jsonb('shielded_verification'),
     /** Owning user, when the recipient has an identity. */
     ownerId: uuid('owner_id').references(() => users.id),
     expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),

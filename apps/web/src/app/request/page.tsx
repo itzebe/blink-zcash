@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
-import { convertUsdToZec, settledZecAmount, privacyCapability, type PrivacyCapability, type PaymentPurpose } from '@blink/shared';
+import { convertUsdToZec, settledZecAmount, privacyCapability, shieldedOnlyPolicy, withUnifiedReceivers, type PrivacyCapability, type PaymentPurpose } from '@blink/shared';
 import { parseAddress } from '@blink/zcash';
 import { Shell, TopBar, Alert } from '@/components/Shell';
 import { BlinkPaymentCard } from '@/components/BlinkPaymentCard';
@@ -105,18 +105,29 @@ function previewZec(usd: string, price: string | null): string | null {
 }
 
 /**
- * Best-effort client-side privacy preview from the typed address. The server
- * recomputes and stores the authoritative capability at creation; this is only
- * so the recipient sees the privacy of the route before they submit.
+ * Best-effort client-side preview of the recipient route. The server recomputes
+ * and stores the authoritative capability at creation; this is only so the
+ * recipient sees — before they submit — whether BLINK's shielded-only policy
+ * would accept the address. It applies the exact same policy as the API, so a
+ * mixed (transparent-bearing) or unconfirmable address is shown as rejected
+ * rather than described as shielded.
  */
-function previewPrivacy(address: string, network: 'testnet' | 'mainnet'): PrivacyCapability | null {
-  if (!address.trim()) return null;
+function previewPrivacy(
+  address: string,
+  network: 'testnet' | 'mainnet',
+): { privacy: PrivacyCapability | null; rejected: boolean } {
+  if (!address.trim()) return { privacy: null, rejected: false };
   try {
     const parsed = parseAddress(address.trim());
-    if (parsed.network !== network) return null;
-    return privacyCapability(parsed.kind);
+    if (parsed.network !== network) return { privacy: null, rejected: false };
+    const verdict = shieldedOnlyPolicy(parsed.receivers);
+    if (!verdict.ok) return { privacy: null, rejected: true };
+    return {
+      privacy: withUnifiedReceivers(privacyCapability(parsed.kind), verdict.receivers),
+      rejected: false,
+    };
   } catch {
-    return null;
+    return { privacy: null, rejected: false };
   }
 }
 
@@ -140,6 +151,7 @@ export default function RequestPage() {
   const [copied, setCopied] = useState(false);
 
   const privacyPreview = network ? previewPrivacy(recipientAddress, network) : null;
+  const recipientRejected = privacyPreview?.rejected ?? false;
 
   function applyMode(next: UseCaseMode) {
     setMode(next.id);
@@ -493,11 +505,24 @@ export default function RequestPage() {
           <p className="tiny muted">
             Stays on the server behind this link. It never appears in the shareable URL.
           </p>
-          {/* Privacy of the route, computed from the address kind. */}
-          {privacyPreview ? <PrivacyPanel privacy={privacyPreview} compact /> : null}
+          {/* Privacy of the route, computed from the actual receiver composition. */}
+          {privacyPreview?.privacy ? (
+            <PrivacyPanel privacy={privacyPreview.privacy} compact />
+          ) : null}
+          {recipientRejected ? (
+            <Alert kind="error">
+              BLINK requires a shielded-only recipient. This address can also receive
+              transparently (it carries a transparent receiver), so a wallet could settle the
+              payment publicly on-chain. Use a Sapling address or a shielded-only Unified Address.
+            </Alert>
+          ) : null}
         </div>
 
-        <button className="btn btn--primary" type="submit" disabled={busy || !ready}>
+        <button
+          className="btn btn--primary"
+          type="submit"
+          disabled={busy || !ready || recipientRejected}
+        >
           {busy ? 'Creating…' : !ready ? 'Connecting…' : 'Create payment'}
         </button>
         {!ready ? (

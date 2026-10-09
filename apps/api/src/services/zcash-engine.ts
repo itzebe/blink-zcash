@@ -18,6 +18,25 @@ export interface InspectResult {
   kind: AddressKind;
   network: ZcashNetwork;
   canReceiveMemo: boolean;
+  /**
+   * The receiver pools actually present in the address. For a Unified Address
+   * this is the real ZIP 316 receiver composition, so the caller can tell a
+   * shielded-only UA from one that also (or only) exposes a transparent receiver.
+   */
+  receivers: AddressReceivers;
+}
+
+/** Receiver pools of an address, as reported by the authoritative engine. */
+export interface AddressReceivers {
+  transparent: boolean;
+  sapling: boolean;
+  orchard: boolean;
+  /** Whether a shielded (Sapling or Orchard) receiver is present. */
+  shielded: boolean;
+  /** Whether the only recognized receivers are transparent ones. */
+  transparentOnly: boolean;
+  /** A receiver of an unrecognised typecode is present. */
+  unknown: boolean;
 }
 
 export interface EngineResult<T> {
@@ -29,6 +48,37 @@ export interface EngineResult<T> {
 export interface TransactionInfo {
   txid: string;
   size: number;
+}
+
+/** The pools a transaction touches, from its bundles. */
+export interface TxPools {
+  transparent: boolean;
+  sapling: boolean;
+  orchard: boolean;
+  shielded: boolean;
+}
+
+/**
+ * The public facts a transaction exposes, as decoded by the authoritative
+ * engine. A transparent recipient and amount can be matched; a shielded one
+ * cannot. `transparentRecipientZatoshis` is set only when the expected
+ * recipient's transparent receiver was actually paid.
+ */
+export interface TransactionEvidence {
+  txid: string;
+  size: number;
+  pools: TxPools;
+  recipientHasTransparent: boolean;
+  /** Whether the requested recipient exposes a shielded (Sapling/Orchard) receiver. */
+  recipientHasShielded: boolean;
+  transparentRecipientZatoshis: number | null;
+}
+
+export interface InspectTransactionOptions {
+  network: ZcashNetwork;
+  /** The requested recipient address. Lets the engine match a transparent output. */
+  expectedAddress?: string;
+  branch?: string;
 }
 
 export interface ZcashEngine {
@@ -57,6 +107,16 @@ export interface ZcashEngine {
    * the official Zcash crates. Never fabricates a result: malformed bytes throw.
    */
   decodeTransaction(dataHex: string, branch?: string): Promise<EngineResult<TransactionInfo>>;
+  /**
+   * Decode raw transaction bytes and report the public verification facts: the
+   * pools the transaction touches and, when an expected recipient is given, how
+   * much it pays that recipient's transparent receiver. Never fabricates a
+   * result: malformed bytes throw.
+   */
+  inspectTransaction(
+    dataHex: string,
+    options: InspectTransactionOptions,
+  ): Promise<EngineResult<TransactionEvidence>>;
 }
 
 /**
@@ -78,6 +138,64 @@ export class EngineUnavailableError extends Error {
     super(message);
     this.name = 'EngineUnavailableError';
   }
+}
+
+/**
+ * Map the engine's snake_case receiver pools onto the client shape, falling back
+ * to a conservative derivation from the address kind when an older engine build
+ * omits the field. A Unified Address with no receiver data is reported as
+ * `unknown` — never defaulted to shielded — so a missing field can never make an
+ * unconfirmed route look private.
+ */
+function normalizeReceivers(
+  kind: AddressKind,
+  raw?: {
+    transparent: boolean;
+    sapling: boolean;
+    orchard: boolean;
+    shielded: boolean;
+    transparent_only: boolean;
+    unknown: boolean;
+  },
+): AddressReceivers {
+  if (raw) {
+    return {
+      transparent: raw.transparent,
+      sapling: raw.sapling,
+      orchard: raw.orchard,
+      shielded: raw.shielded,
+      transparentOnly: raw.transparent_only,
+      unknown: raw.unknown,
+    };
+  }
+  if (kind === 'sapling') {
+    return {
+      transparent: false,
+      sapling: true,
+      orchard: false,
+      shielded: true,
+      transparentOnly: false,
+      unknown: false,
+    };
+  }
+  if (kind === 'transparent') {
+    return {
+      transparent: true,
+      sapling: false,
+      orchard: false,
+      shielded: false,
+      transparentOnly: true,
+      unknown: false,
+    };
+  }
+  return {
+    transparent: false,
+    sapling: false,
+    orchard: false,
+    shielded: false,
+    transparentOnly: false,
+    unknown: true,
+  };
 }
 
 export function createZcashEngine(serviceUrl: string, defaultTimeoutMs = 10_000): ZcashEngine {
@@ -168,6 +286,14 @@ export function createZcashEngine(serviceUrl: string, defaultTimeoutMs = 10_000)
         kind: string;
         network: string;
         can_receive_memo: boolean;
+        receivers?: {
+          transparent: boolean;
+          sapling: boolean;
+          orchard: boolean;
+          shielded: boolean;
+          transparent_only: boolean;
+          unknown: boolean;
+        };
       }>('/v1/address/inspect', { address, network });
       return {
         value: {
@@ -175,6 +301,7 @@ export function createZcashEngine(serviceUrl: string, defaultTimeoutMs = 10_000)
           kind: json.kind as AddressKind,
           network: json.network as ZcashNetwork,
           canReceiveMemo: json.can_receive_memo,
+          receivers: normalizeReceivers(json.kind as AddressKind, json.receivers),
         },
         authoritative: true,
       };
@@ -198,6 +325,36 @@ export function createZcashEngine(serviceUrl: string, defaultTimeoutMs = 10_000)
       });
       return {
         value: { txid: json.txid, size: json.size },
+        authoritative: true,
+      };
+    },
+
+    async inspectTransaction(dataHex, options) {
+      if (!configured) {
+        throw new EngineUnavailableError('BLINK_ZCASH_SERVICE_URL is not configured');
+      }
+      const json = await call<{
+        txid: string;
+        size: number;
+        pools: TxPools;
+        recipient_has_transparent: boolean;
+        recipient_has_shielded: boolean;
+        transparent_recipient_zatoshis: number | null;
+      }>('/v1/transaction/inspect', {
+        data: dataHex,
+        network: options.network,
+        ...(options.expectedAddress ? { expected_address: options.expectedAddress } : {}),
+        ...(options.branch ? { branch: options.branch } : {}),
+      });
+      return {
+        value: {
+          txid: json.txid,
+          size: json.size,
+          pools: json.pools,
+          recipientHasTransparent: json.recipient_has_transparent,
+          recipientHasShielded: json.recipient_has_shielded,
+          transparentRecipientZatoshis: json.transparent_recipient_zatoshis,
+        },
         authoritative: true,
       };
     },

@@ -13,9 +13,28 @@
  */
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
-import { ALLOWED_EXPIRY_MINUTES } from '@blink/shared';
+import { ALLOWED_EXPIRY_MINUTES, type ShieldedVerificationRecord } from '@blink/shared';
 import { PaymentRequestError } from '../services/payment-service.js';
 import type { ZecUsdPriceProvider } from '../services/price-service.js';
+
+/**
+ * The honest receipt statement, driven by what the verification layer actually
+ * established — never by the fact that a transaction is simply confirmed. A
+ * shielded settlement stays partially verified: BLINK observed shielded-pool
+ * activity but cannot name the recipient or amount.
+ */
+export function receiptStatement(shielded: ShieldedVerificationRecord | null): string {
+  const provable =
+    'BLINK cannot cryptographically prove the sender, recipient or amount of a shielded transaction; those details are private to the parties involved.';
+  switch (shielded?.state) {
+    case 'recipient_verified':
+      return 'This receipt confirms that BLINK observed a confirmed Zcash transaction that pays the requested recipient. The recipient and amount were publicly verifiable for this transparent-capable address.';
+    case 'shielded_activity_observed':
+      return `This receipt confirms that BLINK observed a confirmed Zcash transaction that carries shielded-pool activity and does not pay the recipient transparently. BLINK cannot name the recipient or amount of a shielded transfer from public data, so the requested recipient and amount remain unverified. ${provable}`;
+    default:
+      return 'This receipt confirms that BLINK observed a confirmed Zcash transaction associated with this payment request. BLINK cannot cryptographically prove the sender, recipient or amount of a shielded transaction; those details are private to the parties involved.';
+  }
+}
 
 export interface RouteDeps {
   service: import('../services/payment-service.js').PaymentService;
@@ -252,6 +271,7 @@ export async function registerRoutes(app: FastifyInstance, deps: RouteDeps): Pro
           provider: config.BLINK_VERIFICATION_PROVIDER,
           confirmations: outcome.confirmations,
           status: outcome.status,
+          shielded: outcome.shielded ?? null,
         },
       });
     } catch (err) {
@@ -293,6 +313,7 @@ export async function registerRoutes(app: FastifyInstance, deps: RouteDeps): Pro
         message: 'a receipt is only issued for a confirmed payment',
       });
     }
+    const shielded = fresh.shieldedVerification as ShieldedVerificationRecord | null;
     return reply.send({
       receipt: {
         shortCode: fresh.shortCode,
@@ -309,8 +330,8 @@ export async function registerRoutes(app: FastifyInstance, deps: RouteDeps): Pro
         txid: fresh.txid,
         confirmations: fresh.confirmations,
         paidAt: fresh.updatedAt.toISOString(),
-        statement:
-          'This receipt confirms that BLINK observed a confirmed Zcash transaction associated with this payment request. BLINK cannot cryptographically prove the sender, recipient or amount of a shielded transaction; those details are private to the parties involved.',
+        shieldedVerification: shielded,
+        statement: receiptStatement(shielded),
       },
     });
   });

@@ -24,14 +24,34 @@
 import { base58check as scureBase58Check } from '@scure/base';
 import { sha256 } from '@noble/hashes/sha256';
 import type { ZcashNetwork } from '@blink/shared';
+import { decodeUnifiedReceivers, f4jumbleInvMut, type UnifiedReceiversDecoded } from './unified.js';
 
 export type AddressKind = 'transparent' | 'sapling' | 'unified';
+
+/**
+ * The receiver pools an address can receive into. For a non-Unified address this
+ * is derived from the address type; for a Unified Address it is derived by
+ * inspecting the actual ZIP 316 receivers, never from the `u…` prefix.
+ */
+export interface ReceiverPools {
+  transparent: boolean;
+  sapling: boolean;
+  orchard: boolean;
+  /** Whether a shielded (Sapling or Orchard) receiver is present. */
+  shielded: boolean;
+  /** Whether the only recognized receivers are transparent ones. */
+  transparentOnly: boolean;
+  /** A receiver of an unrecognised typecode is present. */
+  unknown: boolean;
+}
 
 export interface ParsedAddress {
   /** The original address string. */
   address: string;
   kind: AddressKind;
   network: ZcashNetwork;
+  /** The receiver pools actually present in this address. */
+  receivers: ReceiverPools;
 }
 
 export class InvalidAddressError extends Error {
@@ -63,6 +83,13 @@ const UNIFIED_HRP: Record<string, ZcashNetwork> = {
   u: 'mainnet',
   utest: 'testnet',
   uregtest: 'testnet',
+  // Revisions 2 (`zu`) and 2 with a transparent item (`tu`), mainnet/testnet.
+  zu: 'mainnet',
+  tu: 'mainnet',
+  zutest: 'testnet',
+  tutest: 'testnet',
+  zuregtest: 'testnet',
+  turegtest: 'testnet',
 };
 
 /**
@@ -143,8 +170,8 @@ function decodeShieldedOrTransparent(address: string): ParsedAddress {
     // Fall through; it may be a transparent address or invalid.
   }
 
-  // Unified Addresses use Bech32m with a `u`-family HRP.
-  if (/^u/.test(lower)) {
+  // Unified Addresses use Bech32m with a `u`/`zu`/`tu`-family HRP.
+  if (/^(u|zu|tu)/.test(lower)) {
     const unified = tryDecodeBech32(address, 'unified', true, UNIFIED_HRP);
     if (unified) return unified;
   }
@@ -158,7 +185,19 @@ function decodeShieldedOrTransparent(address: string): ParsedAddress {
   if (!info) {
     throw new InvalidAddressError('unknown transparent address version', 'malformed');
   }
-  return { address, kind: 'transparent', network: info.network };
+  return {
+    address,
+    kind: 'transparent',
+    network: info.network,
+    receivers: {
+      transparent: true,
+      sapling: false,
+      orchard: false,
+      shielded: false,
+      transparentOnly: true,
+      unknown: false,
+    },
+  };
 }
 
 function bytesToHex(bytes: Uint8Array): string {
@@ -184,14 +223,59 @@ function tryDecodeBech32(
   if (network === null) return null;
 
   const bytes = decoded.bytes;
-  if (kind === 'sapling' && bytes.length !== 43) {
-    throw new InvalidAddressError('Sapling address payload has the wrong length', 'malformed');
-  }
-  if (kind === 'unified' && bytes.length < 16) {
-    throw new InvalidAddressError('Unified Address payload is too short', 'malformed');
+  if (kind === 'sapling') {
+    if (bytes.length !== 43) {
+      throw new InvalidAddressError('Sapling address payload has the wrong length', 'malformed');
+    }
+    return {
+      address,
+      kind,
+      network,
+      receivers: {
+        transparent: false,
+        sapling: true,
+        orchard: false,
+        shielded: true,
+        transparentOnly: false,
+        unknown: false,
+      },
+    };
   }
 
-  return { address, kind, network };
+  // Unified Address: unwrap the ZIP 316 item stream so the receiver pools are
+  // known, rather than assuming every `u…` address is shielded.
+  //
+  // ZIP 316's `F4Jumble` is defined only for messages of at least 48 bytes
+  // (the encoding of the smallest valid UA: a 16-byte HRP padding block plus a
+  // P2PKH receiver item). Anything shorter cannot be the output of the
+  // transform, so reject it before attempting the inverse — a payload below the
+  // floor must not be accepted as a valid (if small) UA. The authoritative Rust
+  // engine (`zcash_address`) enforces the same bound.
+  if (bytes.length < 48) {
+    throw new InvalidAddressError('Unified Address payload is too short', 'malformed');
+  }
+  let receivers: UnifiedReceiversDecoded;
+  try {
+    const unjumbled = bytes.slice();
+    f4jumbleInvMut(unjumbled);
+    receivers = decodeUnifiedReceivers(unjumbled, decoded.hrp);
+  } catch {
+    throw new InvalidAddressError('Unified Address could not be decoded', 'malformed');
+  }
+  const shielded = receivers.sapling || receivers.orchard;
+  return {
+    address,
+    kind: 'unified',
+    network,
+    receivers: {
+      transparent: receivers.transparent,
+      sapling: receivers.sapling,
+      orchard: receivers.orchard,
+      shielded,
+      transparentOnly: receivers.transparent && !shielded,
+      unknown: receivers.unknown,
+    },
+  };
 }
 
 /* -------------------------------------------------------------------------- */

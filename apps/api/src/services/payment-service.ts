@@ -17,11 +17,16 @@ import {
   normaliseUsdAmount,
   parseZecToZatoshis,
   privacyCapability,
+  shieldedOnlyPolicy,
+  withUnifiedReceivers,
   type Currency,
   type PaymentPurpose,
   type PaymentStatus,
   type PrivacyCapability,
   type PublicPaymentRequest,
+  type ShieldedReceivers,
+  type ShieldedVerificationRecord,
+  type ShieldedVerificationState,
   type ZcashNetwork,
 } from '@blink/shared';
 import { buildZip321Uri } from '@blink/payment-request';
@@ -30,6 +35,7 @@ import {
   parseAddress,
   InvalidAddressError,
   type AddressKind,
+  type ReceiverPools,
 } from '@blink/zcash';
 import { and, eq, lt, sql } from 'drizzle-orm';
 import type { Database } from '../db/index.js';
@@ -37,7 +43,7 @@ import { paymentEvents, paymentRequests, transactions } from '../db/schema.js';
 import type { Crypto } from '../crypto.js';
 import { generateShortCode, isValidShortCode } from './short-code.js';
 import { EngineUnavailableError, type ZcashEngine } from './zcash-engine.js';
-import type { VerificationProvider } from './verification-provider.js';
+import type { Observation, VerificationProvider } from './verification-provider.js';
 import { PriceUnavailableError, type ZecUsdPriceProvider } from './price-service.js';
 
 export interface CreatePaymentRequestInput {
@@ -92,6 +98,12 @@ export interface VerificationOutcome {
   txid: string | null;
   confirmations: number;
   observed: boolean;
+  /**
+   * The honest shielded-payment verification result, when the verification layer
+   * had authoritative evidence to classify. `null`/absent when nothing was
+   * observed or the transaction's composition could not be decoded.
+   */
+  shielded?: ShieldedVerificationRecord | null;
 }
 
 export class PaymentService {
@@ -116,13 +128,13 @@ export class PaymentService {
   private async resolveAddress(
     address: string,
     network: ZcashNetwork,
-  ): Promise<{ kind: AddressKind }> {
+  ): Promise<{ kind: AddressKind; receivers: ReceiverPools }> {
     if (this.opts.engine.configured) {
       try {
         const result = await this.callEngine(() =>
           this.opts.engine.inspectAddress(address, network),
         );
-        return { kind: result.value.kind };
+        return { kind: result.value.kind, receivers: result.value.receivers };
       } catch (err) {
         if (err instanceof EngineUnavailableError && err.reason === 'rejected') {
           throw new PaymentRequestError(
@@ -148,13 +160,42 @@ export class PaymentService {
           400,
         );
       }
-      return { kind: parsed.kind };
+      return { kind: parsed.kind, receivers: parsed.receivers };
     } catch (err) {
       if (err instanceof InvalidAddressError) {
         throw new PaymentRequestError(err.message, 'invalid_address', 400);
       }
       throw err;
     }
+  }
+
+  /**
+   * Enforce BLINK's shielded-first recipient policy against the *actual* decoded
+   * ZIP 316 receiver composition — never the `u…` prefix and never the mere
+   * existence of a shielded receiver.
+   *
+   * Refused outright:
+   *   - a bare transparent address, and
+   *   - a Unified Address that also exposes a transparent receiver (a "mixed"
+   *     UA), because ZIP 321 gives the payer's wallet no way to prove it will
+   *     pick the shielded receiver; it may silently settle into the transparent
+   *     one and make the recipient and amount public on-chain.
+   *
+   * Fails closed when the composition is unknown.
+   */
+  private assertShieldedRecipient(receivers: ReceiverPools): ShieldedReceivers {
+    const verdict = shieldedOnlyPolicy(receivers);
+    if (verdict.ok) return verdict.receivers;
+    if (verdict.reason === 'transparent_recipient') {
+      throw new PaymentRequestError(
+        'BLINK requires a shielded-only recipient: this address can receive transparently, which would expose the payment on-chain',
+        'transparent_recipient',
+      );
+    }
+    throw new PaymentRequestError(
+      'BLINK could not confirm a shielded-only receiver in this recipient address',
+      'shielded_receiver_unconfirmed',
+    );
   }
 
   /**
@@ -377,15 +418,22 @@ export class PaymentService {
       );
     }
 
-    const { kind } = await this.resolveAddress(input.recipientAddress, this.opts.network);
+    const { kind, receivers } = await this.resolveAddress(
+      input.recipientAddress,
+      this.opts.network,
+    );
+    // A transparent-capable destination is refused outright (shielded-first).
+    const shieldedReceivers = this.assertShieldedRecipient(receivers);
     const memo = this.validateMemo(input.memo, kind);
     const label = input.label?.trim() || null;
     const message = input.message?.trim() || null;
     const purpose: PaymentPurpose = input.purpose ?? 'invoice';
 
-    // Snapshot the protocol-accurate privacy capability of this route from the
-    // recipient address kind. Stored so a receipt always reports what was shown.
-    const privacy = privacyCapability(kind);
+    // Snapshot the protocol-accurate privacy capability of this route, refined by
+    // the address's real receiver composition. Because a mixed (transparent-
+    // bearing) Unified Address never reaches here, the stored snapshot can only
+    // ever describe a shielded-only route.
+    const privacy = withUnifiedReceivers(privacyCapability(kind), shieldedReceivers);
 
     const uri = await this.buildUri(input.recipientAddress, canonicalAmount, memo, label, message);
 
@@ -618,9 +666,21 @@ export class PaymentService {
     await this.effectiveStatus(row);
     const current = (await this.findByShortCode(shortCode))!;
 
+    // Pass the requested recipient so the engine can establish, from the public
+    // bytes, whether the transaction pays the recipient's transparent receiver.
+    // The address is decrypted only in-process, only for this engine call, and is
+    // never logged or returned.
+    let expectedAddress: string | undefined;
+    try {
+      expectedAddress = this.opts.crypto.decrypt(current.recipientAddressEncrypted);
+    } catch {
+      expectedAddress = undefined;
+    }
+
     const observation = await this.opts.provider.observe({
       claimedTxid: current.claimedTxid ?? undefined,
       network: current.network as ZcashNetwork,
+      ...(expectedAddress ? { expectedAddress } : {}),
     });
 
     if (!observation) {
@@ -631,9 +691,16 @@ export class PaymentService {
           txid: current.txid,
           confirmations: current.confirmations,
           observed: false,
+          shielded: null,
         },
       };
     }
+
+    // Classify what the public transaction bytes actually establish. An
+    // observation with no evidence (an older provider, or bytes the engine could
+    // not decode) is classified conservatively as `observed`, never as a verified
+    // shielded settlement.
+    const shieldedRecord = this.classifyShieldedVerification(current, observation);
 
     // Persist the observation, keyed by txid. Upsert keeps confirmations fresh.
     await this.opts.db
@@ -660,8 +727,18 @@ export class PaymentService {
       });
 
     const required = this.opts.confirmationsRequired;
+    // A public settlement that contradicts the shielded request (a transparent
+    // payment to a shielded-only recipient, or a transaction that touches no
+    // shielded pool at all) must never be promoted to CONFIRMED, however many
+    // confirmations it has. It stays unverified.
+    const contradictsShielded =
+      shieldedRecord?.state === 'transparent_settlement' ||
+      shieldedRecord?.state === 'contradictory';
+
     let next: PaymentStatus;
-    if (observation.confirmations >= required && required > 0) {
+    if (contradictsShielded) {
+      next = 'UNKNOWN';
+    } else if (observation.confirmations >= required && required > 0) {
       next = 'CONFIRMED';
     } else if (observation.confirmations > 0) {
       next = 'CONFIRMING';
@@ -674,6 +751,7 @@ export class PaymentService {
     const patch: Partial<typeof paymentRequests.$inferInsert> = {
       txid: observation.txid,
       confirmations: observation.confirmations,
+      shieldedVerification: shieldedRecord,
       updatedAt: this.now(),
     };
 
@@ -688,6 +766,14 @@ export class PaymentService {
           txid: observation.txid,
           confirmations: observation.confirmations,
           source: observation.source,
+          shieldedState: shieldedRecord?.state ?? null,
+        });
+      } else if (contradictsShielded) {
+        await this.recordEvent(current.id, 'FAILED', {
+          txid: observation.txid,
+          source: observation.source,
+          reason: 'settlement_contradicts_shielded_request',
+          shieldedState: shieldedRecord?.state ?? null,
         });
       } else {
         await this.recordEvent(current.id, 'CONFIRMATION', {
@@ -695,6 +781,7 @@ export class PaymentService {
           confirmations: observation.confirmations,
           source: observation.source,
           status: next,
+          shieldedState: shieldedRecord?.state ?? null,
         });
       }
     } else {
@@ -712,7 +799,72 @@ export class PaymentService {
         txid: fresh.txid,
         confirmations: fresh.confirmations,
         observed: true,
+        shielded: shieldedRecord,
       },
+    };
+  }
+
+  /**
+   * Classify what a provider's observation actually establishes about a shielded
+   * payment, from the public facts only.
+   *
+   * The ordering is deliberate and the distinctions are explicit:
+   *
+   *  1. If the transaction provably pays the requested recipient's transparent
+   *     receiver, that is a `contradictory` settlement for a shielded request —
+   *     the payment is public. (If the recipient is transparent-capable, this is
+   *     the one case where the recipient and amount are independently verified.)
+   *  2. Else if the transaction touches no shielded pool, the settlement is a
+   *     `transparent_settlement`: public, so it contradicts a shielded request.
+   *  3. Else if a shielded bundle is present and the recipient's transparent
+   *     receiver was not paid, shielded activity is `shielded_activity_observed`.
+   *     The recipient and amount remain unprovable from public data.
+   *  4. Otherwise the composition is unknown: report plain `observed`.
+   *
+   * It never claims a shielded recipient or amount was paid: shielded transfers
+   * do not expose them.
+   */
+  private classifyShieldedVerification(
+    row: typeof paymentRequests.$inferSelect,
+    observation: Observation,
+  ): ShieldedVerificationRecord {
+    const evidence = observation.evidence;
+    const recipientKind = row.recipientAddressKind as AddressKind | null | undefined;
+    const observedAt = this.now().toISOString();
+
+    const transparentPaid = (evidence?.transparentRecipientZatoshis ?? null) !== null;
+    const pools = evidence
+      ? {
+          transparent: evidence.pools.transparent,
+          sapling: evidence.pools.sapling,
+          orchard: evidence.pools.orchard,
+          shielded: evidence.pools.shielded,
+        }
+      : null;
+
+    // The only state in which a third party can independently verify recipient
+    // and amount: the recipient exposes a transparent receiver and the
+    // transaction pays it.
+    let state: ShieldedVerificationState;
+    if (transparentPaid) {
+      state = recipientKind === 'transparent' ? 'recipient_verified' : 'contradictory';
+    } else if (pools && !pools.shielded) {
+      state = 'transparent_settlement';
+    } else if (pools && pools.shielded) {
+      state = 'shielded_activity_observed';
+    } else {
+      state = 'observed';
+    }
+
+    return {
+      state,
+      txid: observation.txid,
+      pools,
+      transparentRecipientZatoshis: evidence?.transparentRecipientZatoshis ?? null,
+      recipientVerified: state === 'recipient_verified',
+      amountVerified: state === 'recipient_verified',
+      source: observation.source,
+      observedAt,
     };
   }
 

@@ -89,6 +89,7 @@ struct InspectResponse {
     kind: String,
     network: String,
     can_receive_memo: bool,
+    receivers: blink_zcash::ReceiverPools,
 }
 
 async fn health() -> impl IntoResponse {
@@ -109,6 +110,7 @@ async fn inspect(
         kind: format!("{:?}", info.kind).to_lowercase(),
         network: info.network.as_str().to_string(),
         can_receive_memo: info.can_receive_memo,
+        receivers: info.receivers,
     }))
 }
 
@@ -151,17 +153,20 @@ struct InspectTransactionRequest {
     /// version-appropriate default is used.
     #[serde(default)]
     branch: Option<String>,
-}
-
-#[derive(Debug, Serialize)]
-struct InspectTransactionResponse {
-    txid: String,
-    size: usize,
+    /// Optional network, used to encode any transparent addresses found.
+    #[serde(default)]
+    network: Option<String>,
+    /// Optional expected recipient address. When supplied, the engine reports how
+    /// much the transaction pays to that address's transparent receiver (if it
+    /// has one).
+    #[serde(default)]
+    expected_address: Option<String>,
 }
 
 async fn inspect_transaction(
+    State(state): State<AppState>,
     Json(req): Json<InspectTransactionRequest>,
-) -> Result<Json<InspectTransactionResponse>, ApiError> {
+) -> Result<Json<blink_zcash::TransactionEvidence>, ApiError> {
     let hex = req.data.trim().trim_start_matches("0x");
     if hex.is_empty() || hex.len() % 2 != 0 || !hex.bytes().all(|b| b.is_ascii_hexdigit()) {
         return Err(ApiError::from(Error::Transaction(
@@ -172,11 +177,22 @@ async fn inspect_transaction(
         .step_by(2)
         .map(|i| u8::from_str_radix(&hex[i..i + 2], 16).expect("validated hex"))
         .collect();
-    let info = blink_zcash::decode_transaction(&bytes, req.branch.as_deref())?;
-    Ok(Json(InspectTransactionResponse {
-        txid: info.txid,
-        size: info.size,
-    }))
+
+    let network = match req.network {
+        Some(n) => BlinkNetwork::parse(&n)?,
+        None => state.network,
+    };
+
+    // With an expected recipient, BLINK can also report how much the transaction
+    // pays to that address's transparent receiver. Without one, it reports only
+    // the pools and the transparent outputs.
+    let evidence = blink_zcash::inspect_transaction(
+        &bytes,
+        req.branch.as_deref(),
+        network,
+        req.expected_address.as_deref(),
+    )?;
+    Ok(Json(evidence))
 }
 
 async fn parse(

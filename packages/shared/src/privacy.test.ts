@@ -5,11 +5,64 @@ import {
   privacyHeadline,
   privacyHeadlineSentence,
   privacyLines,
+  shieldedOnlyPolicy,
   withUnifiedReceivers,
 } from './privacy.js';
 
+describe('shieldedOnlyPolicy', () => {
+  it('accepts a Sapling-only Unified Address (no transparent receiver)', () => {
+    const v = shieldedOnlyPolicy({ transparent: false, sapling: true, orchard: false });
+    expect(v.ok).toBe(true);
+    if (v.ok) expect(v.receivers).toEqual({ transparent: false, sapling: true, orchard: false });
+  });
+
+  it('accepts an Orchard-only Unified Address', () => {
+    expect(shieldedOnlyPolicy({ transparent: false, sapling: false, orchard: true }).ok).toBe(true);
+  });
+
+  it('accepts a Sapling+Orchard Unified Address', () => {
+    expect(shieldedOnlyPolicy({ transparent: false, sapling: true, orchard: true }).ok).toBe(true);
+  });
+
+  it('rejects a bare transparent address', () => {
+    const v = shieldedOnlyPolicy({ transparent: true, sapling: false, orchard: false });
+    expect(v).toEqual({ ok: false, reason: 'transparent_recipient' });
+  });
+
+  it('rejects a mixed Unified Address that also exposes a transparent receiver', () => {
+    const v = shieldedOnlyPolicy({ transparent: true, sapling: true, orchard: true });
+    expect(v).toEqual({ ok: false, reason: 'transparent_recipient' });
+  });
+
+  it('rejects a transparent+Orchard Unified Address (mixed)', () => {
+    const v = shieldedOnlyPolicy({ transparent: true, sapling: false, orchard: true });
+    expect(v).toEqual({ ok: false, reason: 'transparent_recipient' });
+  });
+
+  it('fails closed when receiver data is absent', () => {
+    expect(shieldedOnlyPolicy(null)).toEqual({ ok: false, reason: 'shielded_receiver_unconfirmed' });
+    expect(shieldedOnlyPolicy(undefined)).toEqual({
+      ok: false,
+      reason: 'shielded_receiver_unconfirmed',
+    });
+  });
+
+  it('fails closed when only an unrecognised receiver is present', () => {
+    const v = shieldedOnlyPolicy({ transparent: false, sapling: false, orchard: false, unknown: true });
+    expect(v).toEqual({ ok: false, reason: 'shielded_receiver_unconfirmed' });
+  });
+
+  it('fails closed when a known shielded receiver is mixed with an unrecognised one', () => {
+    const v = shieldedOnlyPolicy({ transparent: false, sapling: true, orchard: false, unknown: true });
+    expect(v).toEqual({ ok: false, reason: 'shielded_receiver_unconfirmed' });
+  });
+});
+
 describe('privacyCapability', () => {
-  it('treats a Unified Address recipient as shielded', () => {
+  it('treats a Unified Address recipient as potentially shielded before receiver inspection', () => {
+    // This is the *kind-level* default. The authoritative decision uses the
+    // actual ZIP 316 receivers via `withUnifiedReceivers`; a `u…` prefix alone is
+    // not proof of a shielded receiver.
     const p = privacyCapability('unified');
     expect(p.level).toBe('shielded');
     expect(p.recipient).toBe('protected');
@@ -68,13 +121,25 @@ describe('withUnifiedReceivers', () => {
     expect(p.recipientStatement).toContain('Orchard');
   });
 
-  it('falls back to Sapling when Orchard is absent', () => {
+  it('falls back to Sapling when Orchard is absent (shielded-only)', () => {
     const p = withUnifiedReceivers(privacyCapability('unified'), {
-      transparent: true,
+      transparent: false,
       sapling: true,
       orchard: false,
     });
+    expect(p.level).toBe('shielded');
     expect(p.routeLabel).toContain('Sapling');
+  });
+
+  it('does not claim shielded for a mixed UA that carries a transparent receiver', () => {
+    const p = withUnifiedReceivers(privacyCapability('unified'), {
+      transparent: true,
+      sapling: true,
+      orchard: true,
+    });
+    expect(p.level).toBe('transparent');
+    expect(p.receivers).toBeNull();
+    expect(p.routeLabel.toLowerCase()).toContain('transparent receiver is present');
   });
 
   it('downgrades to transparent when only a transparent receiver exists', () => {
@@ -85,6 +150,17 @@ describe('withUnifiedReceivers', () => {
     });
     expect(p.level).toBe('transparent');
     expect(p.recipient).toBe('public');
+  });
+
+  it('does not claim shielded when no known shielded receiver is present', () => {
+    const p = withUnifiedReceivers(privacyCapability('unified'), {
+      transparent: false,
+      sapling: false,
+      orchard: false,
+      unknown: true,
+    });
+    expect(p.level).toBe('transparent');
+    expect(p.routeLabel.toLowerCase()).toContain('no confirmed shielded receiver');
   });
 
   it('leaves non-Unified capabilities untouched', () => {

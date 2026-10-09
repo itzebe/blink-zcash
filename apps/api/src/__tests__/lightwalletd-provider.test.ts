@@ -17,7 +17,12 @@ import {
   LightwalletdProvider,
   type LightwalletdClientFactory,
 } from '../services/verification-provider.js';
-import type { TransactionInfo, ZcashEngine } from '../services/zcash-engine.js';
+import type {
+  InspectTransactionOptions,
+  TransactionEvidence,
+  TransactionInfo,
+  ZcashEngine,
+} from '../services/zcash-engine.js';
 
 const CLAIMED_TXID = 'a'.repeat(64);
 
@@ -30,10 +35,22 @@ function fakeEngine(overrides: Partial<{
   configured: boolean;
   txid: string | null;
   throwing: boolean;
+  evidence: TransactionEvidence | null;
 }> = {}): ZcashEngine {
   const configured = overrides.configured ?? true;
   const txid = overrides.txid === undefined ? CLAIMED_TXID : overrides.txid;
   const throwing = overrides.throwing ?? false;
+  const evidence =
+    overrides.evidence === undefined
+      ? {
+          txid: CLAIMED_TXID,
+          size: 2005,
+          pools: { transparent: false, sapling: true, orchard: false, shielded: true },
+          recipientHasTransparent: false,
+          recipientHasShielded: true,
+          transparentRecipientZatoshis: null,
+        }
+      : overrides.evidence;
   return {
     configured,
     async inspectAddress() {
@@ -47,6 +64,11 @@ function fakeEngine(overrides: Partial<{
       if (txid === null) throw new Error('decode failed');
       const value: TransactionInfo = { txid, size: 2005 };
       return { value, authoritative: true };
+    },
+    async inspectTransaction(_data: string, _options: InspectTransactionOptions) {
+      if (throwing) throw new Error('decode failed');
+      if (evidence === null) throw new Error('decode failed');
+      return { value: { ...evidence, txid }, authoritative: true };
     },
   };
 }
@@ -281,5 +303,54 @@ describe('LightwalletdProvider', () => {
     });
     const obs = await provider.observe({ claimedTxid: CLAIMED_TXID, network: 'testnet' });
     expect(obs).toBeNull();
+  });
+
+  it('attaches the decoded transaction evidence to the observation', async () => {
+    const calls: Calls = { closed: false };
+    const provider = providerWith({
+      calls,
+      data: bytes,
+      minedHeight: 990,
+      tipHeight: 1000,
+      engine: fakeEngine({
+        evidence: {
+          txid: CLAIMED_TXID,
+          size: 2005,
+          pools: { transparent: true, sapling: false, orchard: false, shielded: false },
+          recipientHasTransparent: true,
+          recipientHasShielded: false,
+          transparentRecipientZatoshis: 25000000,
+        },
+      }),
+    });
+    const obs = await provider.observe({
+      claimedTxid: CLAIMED_TXID,
+      network: 'testnet',
+      expectedAddress: 't1ExampleRecipient',
+    });
+    expect(obs).not.toBeNull();
+    expect(obs!.evidence?.pools.shielded).toBe(false);
+    expect(obs!.evidence?.transparentRecipientZatoshis).toBe(25000000);
+  });
+
+  it('passes the expected recipient through to the engine for a transparent match', async () => {
+    const calls: Calls = { closed: false };
+    let seenExpected: string | undefined;
+    const base = fakeEngine();
+    const engine: ZcashEngine = {
+      ...base,
+      async inspectTransaction(data: string, options: InspectTransactionOptions) {
+        seenExpected = options.expectedAddress;
+        return base.inspectTransaction(data, options);
+      },
+    };
+    const provider = providerWith({ calls, data: bytes, minedHeight: 990, tipHeight: 1000, engine });
+    const obs = await provider.observe({
+      claimedTxid: CLAIMED_TXID,
+      network: 'testnet',
+      expectedAddress: 't1RecipientXyz',
+    });
+    expect(obs).not.toBeNull();
+    expect(seenExpected).toBe('t1RecipientXyz');
   });
 });

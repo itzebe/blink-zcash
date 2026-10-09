@@ -40,13 +40,36 @@ describe('createZcashEngine', () => {
   it('parses a JSON success response from the engine', async () => {
     const url = await startServer((_req, res) => {
       res.writeHead(200, { 'content-type': 'application/json' });
-      res.end(JSON.stringify({ address: ADDRESS, kind: 'unified', network: 'mainnet', can_receive_memo: true }));
+      res.end(
+        JSON.stringify({
+          address: ADDRESS,
+          kind: 'unified',
+          network: 'mainnet',
+          can_receive_memo: true,
+          receivers: {
+            transparent: false,
+            sapling: false,
+            orchard: true,
+            shielded: true,
+            transparent_only: false,
+            unknown: false,
+          },
+        }),
+      );
     });
     const engine = createZcashEngine(url);
     const result = await engine.inspectAddress(ADDRESS, 'mainnet');
     expect(result.authoritative).toBe(true);
     expect(result.value.kind).toBe('unified');
     expect(result.value.network).toBe('mainnet');
+    expect(result.value.receivers).toEqual({
+      transparent: false,
+      sapling: false,
+      orchard: true,
+      shielded: true,
+      transparentOnly: false,
+      unknown: false,
+    });
   });
 
   it('surfaces the engine JSON error message', async () => {
@@ -59,6 +82,42 @@ describe('createZcashEngine', () => {
       /invalid address: Not a Zcash address/,
     );
   });
+  it('maps the transaction-inspection evidence, including the shielded-recipient fact', async () => {
+    let seenPath = '';
+    let seenBody: Record<string, unknown> = {};
+    const url = await startServer((req, res) => {
+      seenPath = req.url ?? '';
+      let body = '';
+      req.on('data', (chunk) => (body += chunk));
+      req.on('end', () => {
+        seenBody = JSON.parse(body) as Record<string, unknown>;
+        res.writeHead(200, { 'content-type': 'application/json' });
+        res.end(
+          JSON.stringify({
+            txid: 'a'.repeat(64),
+            size: 1234,
+            pools: { transparent: false, sapling: true, orchard: false, shielded: true },
+            recipient_has_transparent: false,
+            recipient_has_shielded: true,
+            transparent_recipient_zatoshis: null,
+          }),
+        );
+      });
+    });
+    const engine = createZcashEngine(url);
+    const result = await engine.inspectTransaction('deadbeef', {
+      network: 'testnet',
+      expectedAddress: 'ztestsapling1example',
+    });
+    expect(seenPath).toBe('/v1/transaction/inspect');
+    expect(seenBody.expected_address).toBe('ztestsapling1example');
+    expect(result.authoritative).toBe(true);
+    expect(result.value.pools.shielded).toBe(true);
+    expect(result.value.recipientHasShielded).toBe(true);
+    expect(result.value.transparentRecipientZatoshis).toBeNull();
+  });
+
+
 
   it('reports a non-JSON (HTML) response as an unreachable engine, not a parse error', async () => {
     const url = await startServer((_req, res) => {

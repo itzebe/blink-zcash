@@ -225,6 +225,7 @@ dependencies = [
  "zcash_address",
  "zcash_primitives",
  "zcash_protocol",
+ "zcash_transparent",
  "zip321",
 ]
 

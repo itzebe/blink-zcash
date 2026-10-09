@@ -44,6 +44,7 @@ CREATE TABLE IF NOT EXISTS payment_requests (
   claimed_at timestamptz,
   txid text,
   confirmations integer NOT NULL DEFAULT 0,
+  shielded_verification jsonb,
   owner_id uuid REFERENCES users(id),
   expires_at timestamptz NOT NULL,
   created_at timestamptz NOT NULL DEFAULT now(),
@@ -62,6 +63,8 @@ ALTER TABLE payment_requests ADD COLUMN IF NOT EXISTS price_observed_at timestam
 ALTER TABLE payment_requests ADD COLUMN IF NOT EXISTS privacy jsonb;
 -- Additive migration for the everyday-workflow label (invoice, payroll, …).
 ALTER TABLE payment_requests ADD COLUMN IF NOT EXISTS purpose text NOT NULL DEFAULT 'invoice';
+-- Additive migration for the honest shielded-payment verification result.
+ALTER TABLE payment_requests ADD COLUMN IF NOT EXISTS shielded_verification jsonb;
 
 CREATE TABLE IF NOT EXISTS payment_events (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),

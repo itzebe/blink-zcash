@@ -30,7 +30,7 @@ import * as grpc from '@grpc/grpc-js';
 import * as protoLoader from '@grpc/proto-loader';
 import type { ZcashNetwork } from '@blink/shared';
 
-import type { ZcashEngine } from './zcash-engine.js';
+import type { TransactionEvidence, ZcashEngine } from './zcash-engine.js';
 
 export interface Observation {
   /** The transaction id, exactly as returned by the provider. */
@@ -44,12 +44,27 @@ export interface Observation {
   source: string;
   /** Redacted provider payload, kept for auditability. */
   raw?: Record<string, unknown>;
+  /**
+   * The public facts decoded from the transaction bytes: the pools it touches
+   * and, when an expected recipient was supplied, whether and how much it pays
+   * that recipient's transparent receiver. Present only when the authoritative
+   * engine actually decoded the bytes. Never synthesized: an absent field means
+   * the provider could not establish the composition.
+   */
+  evidence?: TransactionEvidence;
 }
 
 export interface VerifyContext {
   /** A txid the payer claims to have broadcast, if any. May be untrusted. */
   claimedTxid?: string;
   network: ZcashNetwork;
+  /**
+   * The requested recipient address, when the caller wants the provider to
+   * additionally establish whether the transaction pays it. Passed to the engine
+   * as `expected_address`; it only ever enables a *stronger* public match (a
+   * transparent output), never a claim about a shielded recipient.
+   */
+  expectedAddress?: string;
 }
 
 export interface VerificationProvider {
@@ -320,19 +335,32 @@ export class LightwalletdProvider implements VerificationProvider {
     });
   }
 
-  /** Derive the real txid from the returned bytes; null if that is not possible. */
-  private async authoritativeTxid(data: Buffer): Promise<string | null> {
+  /**
+   * Decode the returned bytes with the authoritative engine and return both the
+   * real txid and the public evidence (pools, transparent-recipient match). A
+   * single decode keeps the txid binding and the evidence derived from exactly
+   * the same bytes. Returns `null` when no authoritative decoder is configured
+   * or the bytes cannot be decoded — in which case BLINK reports nothing rather
+   * than guessing the transaction's composition.
+   */
+  private async authoritativeEvidence(
+    data: Buffer,
+    expectedAddress: string | undefined,
+  ): Promise<{ txid: string; evidence: TransactionEvidence } | null> {
     if (!this.engine || !this.engine.configured) return null;
     try {
-      const result = await this.engine.decodeTransaction(data.toString('hex'));
-      return result.value.txid.toLowerCase();
+      const result = await this.engine.inspectTransaction(data.toString('hex'), {
+        network: this.network,
+        ...(expectedAddress ? { expectedAddress } : {}),
+      });
+      return { txid: result.value.txid.toLowerCase(), evidence: result.value };
     } catch {
       return null;
     }
   }
 
   async observe(context: VerifyContext): Promise<Observation | null> {
-    const { claimedTxid, network } = context;
+    const { claimedTxid, network, expectedAddress } = context;
     // Wrong network for this provider: never observe, never guess.
     if (network !== this.network) return null;
     if (!claimedTxid || !/^[0-9a-fA-F]{64}$/.test(claimedTxid)) return null;
@@ -365,9 +393,12 @@ export class LightwalletdProvider implements VerificationProvider {
       const data = raw?.data ? Buffer.from(raw.data) : Buffer.alloc(0);
       if (data.length === 0) return null;
 
-      // 4. Bind the bytes to the claim using the authoritative decoder.
-      const txid = await this.authoritativeTxid(data);
-      if (!txid || txid !== claimedTxid.toLowerCase()) return null;
+      // 4. Bind the bytes to the claim and derive the public evidence using the
+      //    authoritative decoder. The evidence is what lets a caller distinguish a
+      //    transparent settlement from a shielded one.
+      const decoded = await this.authoritativeEvidence(data, expectedAddress);
+      if (!decoded || decoded.txid !== claimedTxid.toLowerCase()) return null;
+      const { txid, evidence } = decoded;
 
       const heightRaw = raw?.height;
       const heightStr = heightRaw == null ? '' : String(heightRaw);
@@ -394,6 +425,7 @@ export class LightwalletdProvider implements VerificationProvider {
           confirmed: confirmations > 0,
           size: data.length,
         },
+        evidence,
       };
     } catch {
       // Unreachable endpoint, timeout, gRPC error, malformed response: report

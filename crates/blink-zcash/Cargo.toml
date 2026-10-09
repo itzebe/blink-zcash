@@ -26,6 +26,9 @@ zip321 = "0.10.0-pre.0"
 zcash_primitives = "0.31.0-pre.0"
 zcash_address = "0.14.0-pre.0"
 zcash_protocol = "0.11.0-pre.0"
+# Transparent address decoding (P2PKH/P2SH) used to match a transparent output
+# against a requested recipient. Same pre-release line as the crates above.
+zcash_transparent = "0.11.0-pre.0"
 
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"

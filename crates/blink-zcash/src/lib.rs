@@ -18,13 +18,15 @@ use std::fmt;
 use std::io::Cursor;
 
 use serde::{Deserialize, Serialize};
-use zcash_address::{ConversionError, TryFromAddress, ZcashAddress};
+use zcash_address::{unified, unified::Container, ConversionError, TryFromAddress, ZcashAddress};
 use zcash_primitives::transaction::Transaction;
 use zcash_protocol::{
     consensus::{BranchId, NetworkType},
     memo::MemoBytes,
     value::Zatoshis,
+    PoolType,
 };
+use zcash_transparent::address::TransparentAddress;
 use zip321::{Payment, TransactionRequest};
 
 pub const ZATOSHIS_PER_ZEC: u64 = 100_000_000;
@@ -138,22 +140,70 @@ pub enum AddressKind {
     Unified,
 }
 
+/// The receiver pools actually present in an address.
+///
+/// For a non-Unified address this is derived from the address type itself. For a
+/// Unified Address it is derived by inspecting the parsed receiver list — never
+/// from the address prefix — so a Unified Address that exposes only a transparent
+/// receiver is reported truthfully as transparent-capable.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ReceiverPools {
+    /// A P2PKH or P2SH receiver/output is present.
+    pub transparent: bool,
+    /// A Sapling receiver is present.
+    pub sapling: bool,
+    /// An Orchard receiver is present.
+    pub orchard: bool,
+    /// Whether this address can receive a shielded (Sapling or Orchard) transfer.
+    pub shielded: bool,
+    /// Whether the only recognized receivers are transparent ones.
+    pub transparent_only: bool,
+    /// A receiver of a type this build does not recognise is present. The pool
+    /// composition cannot be fully determined, so the capability must not be
+    /// claimed. A Unified Address with an unknown receiver and no known shielded
+    /// receiver is treated as not confirmably shielded.
+    pub unknown: bool,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AddressInfo {
     pub address: String,
     pub kind: AddressKind,
     pub network: BlinkNetwork,
     pub can_receive_memo: bool,
+    /// The receiver pools actually present in this address.
+    pub receivers: ReceiverPools,
+}
+
+/// The receiver composition of a Unified Address derived from its parsed items.
+fn unified_receiver_pools(ua: &unified::Address) -> ReceiverPools {
+    let transparent = ua.has_receiver_of_type(PoolType::TRANSPARENT);
+    let sapling = ua.has_receiver_of_type(PoolType::SAPLING);
+    let orchard = ua.has_receiver_of_type(PoolType::ORCHARD);
+    let unknown = ua
+        .items()
+        .iter()
+        .any(|item| matches!(item, unified::Receiver::Unknown { .. }));
+    ReceiverPools {
+        transparent,
+        sapling,
+        orchard,
+        shielded: sapling || orchard,
+        transparent_only: transparent && !(sapling || orchard),
+        unknown,
+    }
 }
 
 /// A classifier used with [`ZcashAddress::convert`]. The default trait methods
 /// reject Sprout addresses, which is exactly the ZIP 321 requirement. The tuple
-/// conversion lets us recover both the network and the address kind from a
-/// single parse.
+/// conversion lets us recover the network, the address kind, and — for a Unified
+/// Address — the actual receiver pools from a single parse.
 #[derive(Debug, Clone, Copy)]
 pub struct Classified {
     pub network: BlinkNetwork,
     pub kind: AddressKind,
+    /// Present and meaningful only for a Unified Address.
+    pub unif: Option<ReceiverPools>,
 }
 
 impl TryFromAddress for Classified {
@@ -166,16 +216,19 @@ impl TryFromAddress for Classified {
         Ok(Classified {
             network: network_type_to_blink(net),
             kind: AddressKind::Sapling,
+            unif: None,
         })
     }
 
     fn try_from_unified(
         net: NetworkType,
-        _data: zcash_address::unified::Address,
+        data: unified::Address,
     ) -> std::result::Result<Self, ConversionError<Self::Error>> {
+        let unif = unified_receiver_pools(&data);
         Ok(Classified {
             network: network_type_to_blink(net),
             kind: AddressKind::Unified,
+            unif: Some(unif),
         })
     }
 
@@ -186,6 +239,7 @@ impl TryFromAddress for Classified {
         Ok(Classified {
             network: network_type_to_blink(net),
             kind: AddressKind::Transparent,
+            unif: None,
         })
     }
 
@@ -196,6 +250,7 @@ impl TryFromAddress for Classified {
         Ok(Classified {
             network: network_type_to_blink(net),
             kind: AddressKind::Transparent,
+            unif: None,
         })
     }
 }
@@ -208,11 +263,41 @@ pub fn inspect_address(address: &str) -> Result<AddressInfo> {
         .clone()
         .convert::<Classified>()
         .map_err(map_conversion_error)?;
+    let receivers = match (classified.kind, classified.unif) {
+        (AddressKind::Unified, Some(pools)) => pools,
+        (AddressKind::Sapling, _) => ReceiverPools {
+            transparent: false,
+            sapling: true,
+            orchard: false,
+            shielded: true,
+            transparent_only: false,
+            unknown: false,
+        },
+        (AddressKind::Transparent, _) => ReceiverPools {
+            transparent: true,
+            sapling: false,
+            orchard: false,
+            shielded: false,
+            transparent_only: true,
+            unknown: false,
+        },
+        // A Unified address whose receiver pools were not recovered must not be
+        // defaulted to shielded; report it as unknown.
+        (AddressKind::Unified, None) => ReceiverPools {
+            transparent: false,
+            sapling: false,
+            orchard: false,
+            shielded: false,
+            transparent_only: false,
+            unknown: true,
+        },
+    };
     Ok(AddressInfo {
         address: parsed.encode(),
         kind: classified.kind,
         network: classified.network,
         can_receive_memo: parsed.can_receive_memo(),
+        receivers,
     })
 }
 
@@ -474,6 +559,49 @@ pub struct TransactionInfo {
     pub size: usize,
 }
 
+/// The pools a transaction touches, derived from its bundles.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TxPools {
+    pub transparent: bool,
+    pub sapling: bool,
+    pub orchard: bool,
+    /// Whether the transaction carries a shielded (Sapling or Orchard) bundle.
+    pub shielded: bool,
+}
+
+/// A transparent output of a transaction: the recipient address and its value.
+/// Both are public on-chain data.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TransparentOutput {
+    /// The recipient transparent address, encoded for the requested network.
+    pub address: String,
+    /// The output value, in zatoshis.
+    pub value_zatoshis: u64,
+}
+
+/// What can honestly be established from a transaction's public bytes.
+///
+/// This is the verification boundary. A transparent recipient and amount are
+/// public, so they can be matched. A shielded recipient and amount are not
+/// public: a third party without the recipient's viewing key cannot prove them,
+/// and this structure never pretends otherwise — `shielded` reports only that a
+/// shielded bundle is present, not who or how much it paid.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TransactionEvidence {
+    pub txid: String,
+    pub size: usize,
+    pub pools: TxPools,
+    /// Every transparent output (recipient + value), in order.
+    pub transparent_outputs: Vec<TransparentOutput>,
+    /// Whether the expected recipient address exposes a transparent receiver.
+    pub recipient_has_transparent: bool,
+    /// Whether the expected recipient address exposes a shielded receiver.
+    pub recipient_has_shielded: bool,
+    /// The total zatoshis the transaction pays to the expected recipient's
+    /// transparent receiver, when it has one and the transaction pays it.
+    pub transparent_recipient_zatoshis: Option<u64>,
+}
+
 /// Decode raw Zcash transaction bytes and return the real txid.
 ///
 /// The txid is derived from the transaction itself using the official
@@ -485,16 +613,148 @@ pub struct TransactionInfo {
 /// it. It is supplied by lightwalletd's `RawTransaction.height`, which the caller
 /// must translate into confirmations against the current chain tip.
 pub fn decode_transaction(data: &[u8], branch: Option<&str>) -> Result<TransactionInfo> {
+    let tx = read_transaction(data, branch)?;
+    Ok(TransactionInfo {
+        txid: tx.txid().to_string(),
+        size: data.len(),
+    })
+}
+
+fn read_transaction(data: &[u8], branch: Option<&str>) -> Result<Transaction> {
     let branch = match branch {
         Some(name) => parse_branch(name)
             .ok_or_else(|| Error::Transaction(format!("unknown branch: {name}")))?,
         None => default_branch_for_decode(),
     };
-    let tx = Transaction::read(Cursor::new(data), branch)
-        .map_err(|e| Error::Transaction(format!("could not decode: {e}")))?;
-    Ok(TransactionInfo {
+    Transaction::read(Cursor::new(data), branch)
+        .map_err(|e| Error::Transaction(format!("could not decode: {e}")))
+}
+
+/// A classifier that recovers a Unified Address's receiver list.
+struct UaOnly(unified::Address);
+
+impl TryFromAddress for UaOnly {
+    type Error = std::convert::Infallible;
+
+    fn try_from_unified(
+        _net: NetworkType,
+        ua: unified::Address,
+    ) -> std::result::Result<Self, ConversionError<Self::Error>> {
+        Ok(UaOnly(ua))
+    }
+}
+
+/// The transparent receiver an address exposes, encoded for `network`.
+///
+/// For a transparent address this is the address itself. For a Unified Address it
+/// is the P2PKH or P2SH receiver, when present — the receiver a wallet could
+/// silently settle into. For a Sapling address there is none.
+fn transparent_receiver_address(address: &str, network: BlinkNetwork) -> Result<Option<String>> {
+    let parsed =
+        ZcashAddress::try_from_encoded(address).map_err(|e| Error::AddressParse(e.to_string()))?;
+    let net = network.to_network_type();
+    if let Ok(UaOnly(ua)) = parsed.clone().convert::<UaOnly>() {
+        for item in ua.items() {
+            match item {
+                unified::Receiver::P2pkh(d) => {
+                    return Ok(Some(
+                        TransparentAddress::PublicKeyHash(d)
+                            .to_zcash_address(net)
+                            .encode(),
+                    ));
+                }
+                unified::Receiver::P2sh(d) => {
+                    return Ok(Some(
+                        TransparentAddress::ScriptHash(d)
+                            .to_zcash_address(net)
+                            .encode(),
+                    ));
+                }
+                _ => {}
+            }
+        }
+        return Ok(None);
+    }
+    if let Ok(t) = parsed.convert::<TransparentAddress>() {
+        return Ok(Some(t.to_zcash_address(net).encode()));
+    }
+    Ok(None)
+}
+
+/// Whether an address exposes a shielded (Sapling or Orchard) receiver.
+///
+/// Reuses the same classifier as [`inspect_address`], so the answer is exactly
+/// the composition BLINK accepts or rejects elsewhere. An address that cannot be
+/// parsed returns false — never inferred.
+fn has_shielded_receiver(address: &str) -> bool {
+    inspect_address(address)
+        .map(|info| info.receivers.shielded)
+        .unwrap_or(false)
+}
+
+/// Decode a transaction and report the public facts relevant to verification:
+/// which pools it touches, every transparent output, and how much it pays to the
+/// expected recipient's transparent receiver (if that recipient has one).
+///
+/// This is deliberately the *maximum* a third party can establish from public
+/// bytes. It never reports a shielded recipient or amount, because those are not
+/// public. A shielded request therefore yields `transparent_recipient_zatoshis:
+/// None` and `pools.shielded: true` — enough to reject a transparent settlement
+/// and to confirm a shielded bundle is present, but never enough to claim who was
+/// paid or how much.
+pub fn inspect_transaction(
+    data: &[u8],
+    branch: Option<&str>,
+    network: BlinkNetwork,
+    expected_address: Option<&str>,
+) -> Result<TransactionEvidence> {
+    let tx = read_transaction(data, branch)?;
+    let net = network.to_network_type();
+
+    let transparent_bundle = tx.transparent_bundle();
+    let sapling = tx.sapling_bundle().is_some();
+    let orchard = tx.orchard_bundle().is_some();
+
+    let mut transparent_outputs = Vec::new();
+    if let Some(bundle) = transparent_bundle {
+        for out in &bundle.vout {
+            if let Some(addr) = out.recipient_address() {
+                transparent_outputs.push(TransparentOutput {
+                    address: addr.to_zcash_address(net).encode(),
+                    value_zatoshis: out.value().into_u64(),
+                });
+            }
+        }
+    }
+
+    let expected = match expected_address {
+        Some(address) => transparent_receiver_address(address, network)?,
+        None => None,
+    };
+    let mut matched: u64 = 0;
+    let mut matched_any = false;
+    if let Some(expected_addr) = &expected {
+        for out in &transparent_outputs {
+            if &out.address == expected_addr {
+                matched = matched.saturating_add(out.value_zatoshis);
+                matched_any = true;
+            }
+        }
+    }
+
+    Ok(TransactionEvidence {
         txid: tx.txid().to_string(),
         size: data.len(),
+        pools: TxPools {
+            transparent: transparent_bundle.is_some(),
+            sapling,
+            orchard,
+            shielded: sapling || orchard,
+        },
+        transparent_outputs,
+        recipient_has_transparent: expected.is_some(),
+        recipient_has_shielded: expected_address.map(has_shielded_receiver).unwrap_or(false),
+        transparent_recipient_zatoshis: if matched_any { Some(matched) } else { None },
     })
 }
 
@@ -610,5 +870,70 @@ mod tests {
             message: None,
         };
         assert!(build_uri(&[spec], BlinkNetwork::Mainnet).is_err());
+    }
+
+    /// A transparent-only address must never advertise a shielded receiver, and a
+    /// shielded address must, so the verification boundary reports them honestly.
+    #[test]
+    fn shielded_receiver_detection_matches_address_kind() {
+        assert!(has_shielded_receiver(TEST_SAPLING));
+        assert!(!has_shielded_receiver(MAIN_TADDR));
+        assert!(!has_shielded_receiver("not-an-address"));
+    }
+
+    /// A mixed Unified Address (a shielded receiver plus a transparent one) must
+    /// report both pools, and its composition must fail the shielded-only policy.
+    #[test]
+    fn classifies_a_mixed_unified_address_as_not_shielded_only() {
+        // R2 testnet UA: transparent + Orchard.
+        let ua = "tutest1g8sgu2gqav6mcswxfnha3yg7ajeznk6ykj3as93tnh32yyq56t9d32dxzgw66r5s4dge2gpr4m54ac9djwr4lm550u8ctpw9h6fl9f632j2dvq7cwugf5pyu5eds7gm5rtuxgrez927";
+        let info = inspect_address(ua).unwrap();
+        assert_eq!(info.kind, AddressKind::Unified);
+        assert!(info.receivers.transparent);
+        assert!(info.receivers.orchard);
+        assert!(info.receivers.shielded);
+        assert!(!info.receivers.transparent_only);
+    }
+
+    #[test]
+    fn transparent_receiver_address_extracts_the_ua_transparent_receiver() {
+        // A mainnet Unified Address that exposes a transparent (P2PKH) receiver
+        // alongside a Sapling one; the transparent receiver must be recoverable.
+        let ua = "u1l8xunezsvhq8fgzfl7404m450nwnd76zshscn6nfys7vyz2ywyh4cc5daaq0c7q2su5lqfh23sp7fkf3kt27ve5948mzpfdvckzaect2jtte308mkwlycj2u0eac077wu70vqcetkxf";
+        let extracted = transparent_receiver_address(ua, BlinkNetwork::Mainnet).unwrap();
+        assert!(extracted.is_some());
+        // A Sapling address exposes no transparent receiver to pay.
+        assert!(
+            transparent_receiver_address(TEST_SAPLING, BlinkNetwork::Testnet)
+                .unwrap()
+                .is_none()
+        );
+    }
+
+    /// The transaction-inspection evidence is grounded in a real decoded testnet
+    /// transaction, never fabricated. The fixture is the official
+    /// `zcash_primitives` round-trip vector.
+    #[test]
+    fn inspect_transaction_reports_pools_and_recipient_from_real_bytes() {
+        let hex = include_str!("../tests/data/tx_read_write.hex").trim();
+        let bytes: Vec<u8> = hex
+            .as_bytes()
+            .chunks(2)
+            .map(|pair| u8::from_str_radix(std::str::from_utf8(pair).unwrap(), 16).unwrap())
+            .collect();
+
+        let evidence =
+            inspect_transaction(&bytes, None, BlinkNetwork::Testnet, Some(TEST_SAPLING)).unwrap();
+        assert_eq!(evidence.size, 2005);
+        // The shielded flag is derived from the bundles, never asserted blindly.
+        assert_eq!(
+            evidence.pools.shielded,
+            evidence.pools.sapling || evidence.pools.orchard
+        );
+        // A shielded recipient does not expose a transparent receiver, so no
+        // amount can be attributed to it from public bytes.
+        assert!(evidence.recipient_has_shielded);
+        assert!(!evidence.recipient_has_transparent);
+        assert_eq!(evidence.transparent_recipient_zatoshis, None);
     }
 }

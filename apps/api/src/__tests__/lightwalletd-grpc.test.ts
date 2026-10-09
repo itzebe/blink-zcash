@@ -32,6 +32,19 @@ const engine: ZcashEngine = {
   async decodeTransaction() {
     return { value: { txid: CLAIMED_TXID, size: 1 }, authoritative: true };
   },
+  async inspectTransaction() {
+    return {
+      value: {
+        txid: CLAIMED_TXID,
+        size: 4,
+        pools: { transparent: false, sapling: true, orchard: false, shielded: true },
+        recipientHasTransparent: false,
+        recipientHasShielded: true,
+        transparentRecipientZatoshis: null,
+      },
+      authoritative: true,
+    };
+  },
 };
 
 function loadServiceDefinition(): grpc.ServiceDefinition {
