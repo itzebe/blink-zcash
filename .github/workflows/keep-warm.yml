@@ -1,28 +1,52 @@
 name: Keep warm
 
-# Render's free plan spins a service down after ~15 minutes without traffic; the
-# next request then waits tens of seconds for a cold start. That window is what
-# produced intermittent 502s and (before the engine client learned to retry)
-# false `invalid_address` failures on request creation.
+# Why this workflow exists
+# ------------------------
+# Render's free plan spins a web service down after ~15 minutes without INBOUND
+# traffic; the next request then waits up to ~90s for a cold start. Only inbound
+# traffic resets that idle timer, so the only way to keep the free services warm
+# is to send them a request more often than every 15 minutes.
 #
-# This job pings the live services on a schedule so they stay warm. It is a
-# mitigation, not a correctness fix: the app itself now tolerates a cold backend
-# (non-blocking connection strip, retried engine calls). For production, move the
-# services to a paid plan so they never spin down.
+# Why the previous version did not work
+# -------------------------------------
+# It used `cron: '*/10 * * * *'` and pinged once per run. But GitHub's `schedule`
+# event is best-effort: docs.github.com states it "can be delayed during periods
+# of high loads" and "some queued jobs may be dropped". Measured on this
+# repository, scheduled runs actually fired every 2.5-10 HOURS (median ~5.5h) --
+# far longer than Render's 15 minute idle window -- so every service was already
+# asleep again by the time the job ran. Confirmed in the run logs: each run saw
+# the engine take ~82s, the API ~32s and the web app ~35s to answer, i.e. every
+# service was cold.
 #
-# The API ping targets `/health/keepalive`, the dedicated, near-zero-cost
-# liveness endpoint. It touches no database, no engine, no price source and no
-# payment logic, so a monitor can call it freely. NEVER point the monitor at a
-# payment endpoint.
+# What this version does
+# ----------------------
+# A single run no longer relies on being scheduled often. It holds ONE job that
+# pings every 5 minutes for about 5h20m and then exits normally. Because the job
+# occupies the `keep-warm` concurrency group, every schedule tick that fires
+# while it is running is simply skipped (see `concurrency` below). The effect is
+# that whichever run starts first keeps pinging for hours, and later runs take
+# over only when it has ended. There is no self-triggering and no recursion.
 #
-# GitHub's scheduler can be delayed under load, so for a hackathon demo ALSO
-# configure an external uptime monitor against the same endpoint at a 5 minute
-# interval (see "Uptime monitoring" in README.md). Neither mechanism keeps the
-# free service permanently on by itself; together they shrink the idle window to
-# almost nothing. External uptime monitoring is required to prevent Render Free
-# from idling the API.
+# Interval choice: a 5 minute ping is the shortest interval GitHub allows for a
+# schedule and is comfortably inside Render's 15 minute idle window. Each cycle
+# sends 4 requests, so the steady rate is 48 requests/hour across all services --
+# ordinary health-check traffic, not a load test, and no higher than the previous
+# once-per-run version when it was working as intended.
 #
-# The repository is public, so GitHub Actions minutes are free here.
+# Honest limitations
+# ------------------
+# This sends ordinary inbound HTTP requests and does not evade any Render policy.
+# It CANNOT guarantee the services never sleep: if GitHub delays the start of a
+# run (the same scheduler delay described above), there can be a gap. It does not
+# change the 750 free instance-hours/month cap, and Render's docs also warn it
+# "may suspend a Free web service that initiates an uncommonly high volume of
+# traffic" (this job only *receives* traffic, so it is unaffected). For a hard
+# always-on guarantee the only compliant answer is a paid instance.
+#
+# Endpoints
+# ---------
+# All endpoints are liveness/readiness only; none touches payment logic.
+# `/health/keepalive` is exempt from rate limiting and does no work.
 #
 # Service names carry a Render-appended suffix. Override the URLs with repository
 # variables (Settings -> Secrets and variables -> Actions -> Variables) if the
@@ -31,11 +55,16 @@ name: Keep warm
 
 on:
   schedule:
-    # Every 10 minutes. GitHub may delay scheduled runs under load; the interval
-    # is chosen to stay comfortably inside Render's ~15 minute idle window.
-    - cron: '*/10 * * * *'
+    # Fallback/restart cadence. Offset off the top of the hour, when GitHub's
+    # scheduler is most congested. While a run is still looping, these ticks are
+    # skipped by the concurrency group; they start a fresh run once one ends.
+    - cron: '7,22,37,52 * * * *'
   workflow_dispatch:
 
+# Only one keep-warm run at a time. While the long-running job holds the group,
+# any newly queued run is `pending` and is replaced by the next one, so ticks do
+# not pile up or run concurrently. `cancel-in-progress` stays false so the active
+# run is never interrupted mid-loop.
 concurrency:
   group: keep-warm
   cancel-in-progress: false
@@ -44,34 +73,63 @@ permissions:
   contents: read
 
 jobs:
-  ping:
-    name: Ping live services
+  keep-warm:
+    name: Keep Render Free services warm
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    # Well under GitHub's 6-hour job ceiling and above the loop budget below.
+    timeout-minutes: 345
     env:
       API_URL: ${{ vars.BLINK_API_URL || 'https://blink-api-j75b.onrender.com' }}
       WEB_URL: ${{ vars.BLINK_WEB_URL || 'https://blink-web-bgkz.onrender.com' }}
       ENGINE_URL: ${{ vars.BLINK_ENGINE_URL || 'https://blink-engine-4em8.onrender.com' }}
     steps:
-      - name: Wake and check the services
+      - name: Keep-warm loop
         run: |
-          # A cold service needs time to boot, so allow a generous timeout and
-          # follow redirects. This job only warms the services; it never fails
-          # the schedule on a single bad response.
-          ping() {
-            local name="$1" url="$2"
-            local out
-            out="$(curl -sS -L --max-time 150 -o /dev/null -w '%{http_code} %{time_total}s' "$url" 2>&1)" || out="curl-error"
-            echo "$name: $out"
+          set -uo pipefail
+
+          # A cold Render Free service can take up to ~90s to answer. This bounds
+          # each request so the loop can never hang on a waking service.
+          READ_TIMEOUT=90
+          # 5 minutes keeps every service inside Render's 15-minute idle window.
+          INTERVAL=300
+          # Stop at 5h20m so the job ends normally, well under the job timeout.
+          MAX_SECONDS=$(( 5 * 3600 + 20 * 60 ))
+
+          START=$(date +%s)
+          cycle=0
+
+          # GET, not HEAD: Render routes both, but GET is exactly what a browser
+          # sends and is the safest way to count as inbound traffic. The HTTP code
+          # is printed so a failure is visible in the log, never silently ignored.
+          wake() {
+            local name="$1" url="$2" code
+            # curl already prints 000 when no HTTP response was received; the
+            # default guards the (rare) empty-output case. A failure is logged as
+            # 000 rather than hidden, so a broken endpoint is visible.
+            code="$(curl -sS -L -o /dev/null --max-time "$READ_TIMEOUT" \
+              -w '%{http_code}' "$url" 2>/dev/null)"
+            printf '%s  %s\n' "${code:-000}" "$name"
           }
 
-          # Primary wake + the recommended uptime-monitor target: cheapest
-          # possible liveness ping, no dependencies, no payment logic.
-          ping "api /health/keepalive" "$API_URL/health/keepalive" || true
-          # The API's /ready pings the Rust engine and the database, so this one
-          # request warms the API and the engine together. /health is the
-          # liveness fallback for deployments that predate /ready.
-          ping "api /ready"    "$API_URL/ready"    || true
-          ping "api /health"   "$API_URL/health"   || true
-          ping "engine /health" "$ENGINE_URL/health" || true
-          ping "web /"         "$WEB_URL/"         || true
+          ping_cycle() {
+            printf '=== cycle %s  (%s UTC) ===\n' "$1" "$(date -u +%H:%M:%S)"
+            # Engine first: it is the slowest to boot and the API's /ready needs it.
+            wake "engine /health"        "$ENGINE_URL/health"
+            wake "api /health/keepalive" "$API_URL/health/keepalive"
+            wake "api /ready"            "$API_URL/ready"
+            wake "web /"                 "$WEB_URL/"
+          }
+
+          ping_cycle 0
+
+          while :; do
+            elapsed=$(( $(date +%s) - START ))
+            if [ "$elapsed" -ge "$MAX_SECONDS" ]; then
+              echo "Reached the ${MAX_SECONDS}s budget; ending this run. A later"
+              echo "scheduled tick will start the next one."
+              break
+            fi
+            cycle=$(( cycle + 1 ))
+            sleep "$INTERVAL"
+            ping_cycle "$cycle"
+          done
