@@ -139,9 +139,19 @@ Rust checks used in CI: `cargo fmt --all -- --check`,
   `EngineUnavailableError` carries a `reason` (`unreachable` vs `rejected`): a
   transient engine problem is retried and then reported as
   `engine_unavailable` (503), so a waking engine can never make a valid address
-  look invalid; only a real 4xx rejection is `invalid_address`. `BLINK_ZCASH_TIMEOUT_MS`
-  (default 10000) must exceed the engine cold-start time. A keep-warm workflow
-  (`.github/workflows/keep-warm.yml`) pings `/ready` + `/health` every 10 min.
+  look invalid; only a real 4xx rejection is `invalid_address`.
+  `BLINK_ZCASH_TIMEOUT_MS` (default 10000) bounds a single engine call, and
+  `BLINK_ZCASH_WAKE_TIMEOUT_MS` (default 120000) bounds a one-time readiness wait
+  before the first authoritative call, so a cold (~81s) engine becomes a bounded
+  wait that succeeds instead of a spurious `engine_unavailable`.
+- **The shared 750 free instance-hours/month is a hard cap; warm within it.**
+  Render grants 750 Free instance-hours per workspace per calendar month, shared
+  across ALL free services, consumed while a service is awake; exhausting them
+  suspends every free service until the 1st. Keeping all three warm 24/7 costs
+  ~2,160h/month (~3x the cap). The keep-warm workflow
+  (`.github/workflows/keep-warm.yml`) therefore warms all three services every
+  5 min only inside a bounded daily UTC window (12:00–18:00 → ~540h/month), and
+  does nothing outside it. It CANNOT guarantee uninterrupted availability.
 - **Every boot-critical I/O is bounded, so a dead dependency fails fast instead
   of hanging the process.** The pg pool sets `connectionTimeoutMillis` (10s;
   node-postgres defaults to `0` = wait forever, which would hang `/ready`), and

@@ -34,6 +34,15 @@ const schema = z.object({
   BLINK_ZCASH_TIMEOUT_MS: z.coerce.number().int().positive().default(10_000),
 
   /**
+   * Total budget (ms) for waiting for a cold engine to answer `/health` before
+   * the first authoritative call of a request. Must exceed the engine's
+   * cold-start time (measured ~81s on Render Free) so a waking engine becomes a
+   * bounded wait that succeeds, not a spurious `engine_unavailable`. The wait is
+   * capped well below Render's HTTP request limit.
+   */
+  BLINK_ZCASH_WAKE_TIMEOUT_MS: z.coerce.number().int().positive().default(120_000),
+
+  /**
    * 32-byte key, hex encoded, used to encrypt recipient addresses at rest
    * (AES-256-GCM). Required in production.
    */

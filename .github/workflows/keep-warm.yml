@@ -20,28 +20,41 @@ name: Keep warm
 #
 # What this version does
 # ----------------------
-# A single run no longer relies on being scheduled often. It holds ONE job that
-# pings every 5 minutes for about 5h20m and then exits normally. Because the job
-# occupies the `keep-warm` concurrency group, every schedule tick that fires
-# while it is running is simply skipped (see `concurrency` below). The effect is
-# that whichever run starts first keeps pinging for hours, and later runs take
-# over only when it has ended. There is no self-triggering and no recursion.
+# A single run no longer relies on being scheduled often. During a bounded daily
+# UTC window it holds ONE job that pings every 5 minutes for at most ~5h30m and
+# then exits normally. Because the job occupies the `keep-warm` concurrency
+# group, every schedule tick that fires while it is running is simply skipped
+# (see `concurrency` below). The effect is that whichever run starts first keeps
+# pinging for hours, and later runs take over only when it has ended. There is no
+# self-triggering and no recursion.
+#
+# Why a bounded window (free instance-hour budget)
+# ------------------------------------------------
+# Render grants 750 Free instance-hours per workspace per calendar month, shared
+# across ALL free services, and a service consumes those hours for as long as it
+# is awake. Keeping all three services warm 24/7 costs 3 x 24h x ~30d = ~2,160h
+# -- roughly 3x the allowance, which would suspend every free service in ~10
+# days. So warming is confined to a daily window (WINDOW_START_HOUR .. 
+# WINDOW_END_HOUR, UTC). A 6h window costs 3 x 6 x ~30 = ~540h/month (~72%),
+# leaving headroom; outside the window the services are allowed to sleep and
+# consume nothing. Adjust the window to taste: it is the only knob that changes
+# the monthly cost.
 #
 # Interval choice: a 5 minute ping is the shortest interval GitHub allows for a
 # schedule and is comfortably inside Render's 15 minute idle window. Each cycle
 # sends 4 requests, so the steady rate is 48 requests/hour across all services --
-# ordinary health-check traffic, not a load test, and no higher than the previous
-# once-per-run version when it was working as intended.
+# ordinary health-check traffic, not a load test.
 #
 # Honest limitations
 # ------------------
 # This sends ordinary inbound HTTP requests and does not evade any Render policy.
 # It CANNOT guarantee the services never sleep: if GitHub delays the start of a
-# run (the same scheduler delay described above), there can be a gap. It does not
-# change the 750 free instance-hours/month cap, and Render's docs also warn it
-# "may suspend a Free web service that initiates an uncommonly high volume of
-# traffic" (this job only *receives* traffic, so it is unaffected). For a hard
-# always-on guarantee the only compliant answer is a paid instance.
+# run (the same scheduler delay described above), there can be a gap; and outside
+# the window they are expected to sleep. It does not change the 750 free
+# instance-hours/month cap, and Render's docs also warn it "may suspend a Free
+# web service that initiates an uncommonly high volume of traffic" (this job only
+# *receives* traffic, so it is unaffected). For a hard always-on guarantee the
+# only compliant answer is a paid instance.
 #
 # Endpoints
 # ---------
@@ -55,11 +68,19 @@ name: Keep warm
 
 on:
   schedule:
-    # Fallback/restart cadence. Offset off the top of the hour, when GitHub's
-    # scheduler is most congested. While a run is still looping, these ticks are
-    # skipped by the concurrency group; they start a fresh run once one ends.
-    - cron: '7,22,37,52 * * * *'
+    # Ticks inside the warm window only (WINDOW_START_HOUR..WINDOW_END_HOUR, UTC).
+    # Offset off the top of the hour, when GitHub's scheduler is most congested.
+    # While a run is still looping, these ticks are skipped by the concurrency
+    # group; they start a fresh run once one ends.
+    - cron: '7,22,37,52 12-17 * * *'
   workflow_dispatch:
+    inputs:
+      # Escape hatch for a manual warm/test outside the window. Scheduled runs
+      # never set this, so they stay inside the window and the hour budget.
+      force:
+        description: 'Ignore the daily warm window and warm now (testing only)'
+        type: boolean
+        default: false
 
 # Only one keep-warm run at a time. While the long-running job holds the group,
 # any newly queued run is `pending` and is replaced by the next one, so ticks do
@@ -76,12 +97,21 @@ jobs:
   keep-warm:
     name: Keep Render Free services warm
     runs-on: ubuntu-latest
-    # Well under GitHub's 6-hour job ceiling and above the loop budget below.
-    timeout-minutes: 345
+    # GitHub-hosted jobs are hard-capped at 360 minutes; use the full budget so a
+    # long warm window is never cancelled mid-loop, and keep the loop's own
+    # safety cap (MAX_SECONDS) below it.
+    timeout-minutes: 360
     env:
       API_URL: ${{ vars.BLINK_API_URL || 'https://blink-api-j75b.onrender.com' }}
       WEB_URL: ${{ vars.BLINK_WEB_URL || 'https://blink-web-bgkz.onrender.com' }}
       ENGINE_URL: ${{ vars.BLINK_ENGINE_URL || 'https://blink-engine-4em8.onrender.com' }}
+      # Daily warm window in UTC (inclusive start, exclusive end). Keep the
+      # `cron:` hours above in sync with these. 12:00-18:00 UTC = 08:00-14:00
+      # US Eastern, roughly a working day across the US and Europe.
+      WINDOW_START_HOUR: '12'
+      WINDOW_END_HOUR: '18'
+      # Manual override (workflow_dispatch only); scheduled runs are always false.
+      FORCE: ${{ github.event.inputs.force || 'false' }}
     steps:
       - name: Keep-warm loop
         run: |
@@ -92,11 +122,32 @@ jobs:
           READ_TIMEOUT=90
           # 5 minutes keeps every service inside Render's 15-minute idle window.
           INTERVAL=300
-          # Stop at 5h20m so the job ends normally, well under the job timeout.
-          MAX_SECONDS=$(( 5 * 3600 + 20 * 60 ))
+          # Absolute safety cap, below the 360-minute job timeout so the job
+          # always ends normally even if the window computation were bypassed.
+          MAX_SECONDS=$(( 5 * 3600 + 30 * 60 ))
 
           START=$(date +%s)
           cycle=0
+
+          # Seconds from now until the window closes (0 if it has already closed).
+          seconds_to_window_end() {
+            local hour min now_sod end_sod
+            hour=$(date -u +%H)
+            min=$(date -u +%M)
+            now_sod=$(( 10#$hour * 3600 + 10#$min * 60 ))
+            end_sod=$(( WINDOW_END_HOUR * 3600 ))
+            if [ "$now_sod" -lt "$end_sod" ]; then
+              echo $(( end_sod - now_sod ))
+            else
+              echo 0
+            fi
+          }
+
+          in_window() {
+            local hour
+            hour=$(date -u +%H)
+            [ $(( 10#$hour )) -ge "$WINDOW_START_HOUR" ] && [ $(( 10#$hour )) -lt "$WINDOW_END_HOUR" ]
+          }
 
           # GET, not HEAD: Render routes both, but GET is exactly what a browser
           # sends and is the safest way to count as inbound traffic. The HTTP code
@@ -120,14 +171,34 @@ jobs:
             wake "web /"                 "$WEB_URL/"
           }
 
+          # Scheduled runs stay inside the daily window so the shared 750-hour
+          # monthly budget is never exhausted; `force` (manual only) overrides.
+          if [ "$FORCE" != "true" ] && ! in_window; then
+            echo "Outside the warm window (${WINDOW_START_HOUR}:00-${WINDOW_END_HOUR}:00 UTC);"
+            echo "not warming. Outside this window the services are allowed to sleep"
+            echo "so they consume no free instance-hours."
+            exit 0
+          fi
+
           ping_cycle 0
 
           while :; do
             elapsed=$(( $(date +%s) - START ))
             if [ "$elapsed" -ge "$MAX_SECONDS" ]; then
-              echo "Reached the ${MAX_SECONDS}s budget; ending this run. A later"
-              echo "scheduled tick will start the next one."
+              echo "Reached the ${MAX_SECONDS}s safety cap; ending this run."
               break
+            fi
+            # Stop when the window closes (skipped for a forced manual run).
+            if [ "$FORCE" != "true" ]; then
+              remaining=$(seconds_to_window_end)
+              if [ "$remaining" -le 0 ]; then
+                echo "The warm window has closed; ending this run until the next window."
+                break
+              fi
+              if [ "$remaining" -lt "$INTERVAL" ]; then
+                echo "Window closes in ${remaining}s (< ${INTERVAL}s); ending this run."
+                break
+              fi
             fi
             cycle=$(( cycle + 1 ))
             sleep "$INTERVAL"

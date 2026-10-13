@@ -198,10 +198,62 @@ function normalizeReceivers(
   };
 }
 
-export function createZcashEngine(serviceUrl: string, defaultTimeoutMs = 10_000): ZcashEngine {
+export function createZcashEngine(
+  serviceUrl: string,
+  defaultTimeoutMs = 10_000,
+  wakeTimeoutMs = 120_000,
+): ZcashEngine {
   const configured = serviceUrl.length > 0;
 
+  /**
+   * Bounded readiness wait. A cold Render Free engine takes ~80s to answer, far
+   * longer than a single call's `defaultTimeoutMs`, so the first authoritative
+   * call after an idle period would exhaust its retries and fail. This waits,
+   * with backoff, until the engine's `/health` answers or the budget runs out.
+   *
+   * It is idempotent (a GET probe), shared between concurrent callers (one
+   * in-flight wait is reused), and never invents a result: it returns as soon as
+   * the engine answers, or `false` when it does not, and the caller then makes
+   * its normal call and surfaces the honest `engine_unavailable` failure. It is
+   * skipped entirely when the engine is not configured.
+   */
+  let wakeInFlight: Promise<boolean> | null = null;
+  function ensureAwake(): Promise<boolean> {
+    // A non-positive budget disables the wait (used by unit tests that drive the
+    // call path directly). Production always passes a positive budget.
+    if (!configured || wakeTimeoutMs <= 0) return Promise.resolve(false);
+    if (wakeInFlight) return wakeInFlight;
+    wakeInFlight = (async () => {
+      const deadline = Date.now() + wakeTimeoutMs;
+      let delay = 500;
+      for (;;) {
+        const probe = new AbortController();
+        const timer = setTimeout(() => probe.abort(), 3_000);
+        try {
+          const res = await fetch(new URL('/health', serviceUrl), {
+            headers: { accept: 'application/json' },
+            signal: probe.signal,
+          });
+          if (res.ok) return true;
+        } catch {
+          // Unreachable (still cold-starting, or a transient network error).
+        } finally {
+          clearTimeout(timer);
+        }
+        if (Date.now() >= deadline) return false;
+        await new Promise((resolve) => setTimeout(resolve, delay));
+        delay = Math.min(delay * 2, 5_000);
+      }
+    })().finally(() => {
+      wakeInFlight = null;
+    });
+    return wakeInFlight;
+  }
+
   async function call<T>(path: string, body: unknown): Promise<T> {
+    // Wake a cold engine before the first authoritative call, so the retries
+    // below run against a warm engine instead of a booting one.
+    await ensureAwake();
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), defaultTimeoutMs);
     try {

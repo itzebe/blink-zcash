@@ -448,12 +448,16 @@ Rules:
 - Do NOT add an in-app `setInterval` loop to keep the backend awake; the app must
   not be responsible for keeping its own infrastructure alive.
 
-The `.github/workflows/keep-warm.yml` workflow pings the same endpoint (plus
-`/ready`, `/health` and the engine) every 10 minutes as a backstop, but GitHub's
+The `.github/workflows/keep-warm.yml` workflow pings `/health/keepalive`, `/ready`,
+`/health` and the engine every 5 minutes, but only inside a bounded daily UTC
+window (12:00–18:00 by default → ~540 of the 750 shared free instance-hours per
+month; keeping all three services warm 24/7 would cost ~2,160h and suspend every
+free service). Outside the window the services are allowed to sleep. GitHub's
 scheduler can be delayed under load, so the external monitor at a 5 minute
 interval is the primary mechanism during a demo. **External uptime monitoring is
 required to prevent Render Free from idling the API.** Render Free is not
-inherently always-on.
+inherently always-on, and the warm window does not guarantee uninterrupted
+availability.
 
 ## 16. Security model
 
@@ -492,11 +496,15 @@ Full detail: [`SECURITY.md`](SECURITY.md) and
   after a quiet period waits tens of seconds for a cold start. BLINK tolerates
   this instead of failing: the web app renders immediately, shows a non-blocking
   status strip, and unlocks payments only once the API confirms the network; the
-  API retries transient engine failures and reports `engine_unavailable` (503)
+  API waits for a waking engine (bounded by `BLINK_ZCASH_WAKE_TIMEOUT_MS`) and
+  then retries transient engine failures, reporting `engine_unavailable` (503)
   rather than mislabelling a valid address as invalid. A keep-warm workflow
   (`.github/workflows/keep-warm.yml`) and — recommended for a demo — an external
   uptime monitor ping the dedicated `GET /health/keepalive` endpoint to shrink the
-  window (see §15). A paid plan removes it entirely; **external uptime monitoring
+  window (see §15). The keep-warm workflow only warms inside a bounded daily UTC
+  window so the shared 750 free instance-hours/month are not exhausted, so the
+  services do still sleep outside it. A paid plan removes this entirely;
+  **external uptime monitoring
   is required to prevent Render Free from idling the API**, since the free tier is
   not inherently always-on.
 - **No wallet auto-detection yet.** "Pay with Zcash" uses the ZIP 321 URI and a

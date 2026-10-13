@@ -220,7 +220,15 @@ export default function RequestPage() {
         /* storage may be unavailable; not fatal */
       }
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : 'Something went wrong. Please try again.');
+      // A cold backend is recoverable, not a dead end: say what happened and
+      // that retrying will work, instead of a raw provider message.
+      if (err instanceof ApiError && err.code === 'engine_unavailable') {
+        setError(
+          'The Zcash validation service is still waking up. This can take about a minute — please try again.',
+        );
+      } else {
+        setError(err instanceof ApiError ? err.message : 'Something went wrong. Please try again.');
+      }
     } finally {
       setBusy(false);
     }
