@@ -225,3 +225,34 @@ Rust checks used in CI: `cargo fmt --all -- --check`,
 ## Repo
 
 Target GitHub: `itzebe/blink-zcash` (MIT).
+
+## Web design system (2026 redesign)
+
+- **Visual identity is light, navy + restrained gold.** `apps/web/src/app/tokens.css`
+  holds every colour, spacing, radius, shadow and font token; `globals.css` only
+  consumes tokens. The old dark/neon theme (`--bg #080a0f`, `--accent #f4b728`,
+  glass blur) is gone. Do not reintroduce gradients or glass.
+- **`AppFrame` is the standard page frame** (`components/Shell.tsx`): shared
+  `SiteHeader` + `Shell` + `SiteFooter`. Home, litepaper, request, scan, receipt
+  and the payer page all use it. `TopBar`/`NetworkPill` still exist for the
+  network badge; the header itself is nav-only.
+- **Class names are a contract.** The Playwright suite asserts on `.action__title`,
+  `.privacy--shielded`, `.privacy__fact--protected/--varies`, `.link-box`,
+  `.network-pill`, `.conn`, `.alert--error`. Keep them when restyling.
+- **Two network pills exist by design.** The homepage renders one connection-driven
+  `NetworkPill` in the hero (`Zcash`/`Zcash Testnet`/`Zcash Mainnet`); the receipt
+  page renders one receipt-driven `NetworkPill` (`Zcash` until the receipt loads).
+  Do not add a third, or add one to the shared header, or `toHaveText` breaks.
+- **`/litepaper` is a static server component** (`app/litepaper/page.tsx`). It is
+  the public, indexable document; keep its claims matched to the code. It must
+  never claim BLINK signs, broadcasts, or proves a shielded recipient/amount.
+- **Metadata is indexable now.** `layout.tsx` sets `robots: { index: true }`,
+  Open Graph, and a `metadataBase` from `APP_BASE_URL` (falls back to the Render
+  web URL). The shareable `/pay/*` and `/receipt/*` routes are `noindex` (their
+  nested `layout.tsx` sets it) and `app/robots.ts` disallows both; only home,
+  litepaper and request are in `app/sitemap.ts`. Never index a short code.
+- **Tests:** `tests/e2e/site.spec.ts` covers the litepaper, nav, footer, mobile
+  menu, responsive widths, and the `robots.txt`/sitemap/`noindex` rules. Run the
+  full suite against a built app; a stale `next start` on :3000 will silently
+  serve the previous build.
+

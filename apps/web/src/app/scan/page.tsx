@@ -3,7 +3,7 @@
 import { useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import jsQR from 'jsqr';
-import { Shell, TopBar, Alert, Row } from '@/components/Shell';
+import { AppFrame, Alert, Row } from '@/components/Shell';
 import { useConnection } from '@/components/ConnectionProvider';
 import { parseSinglePayment, Zip321Error } from '@blink/payment-request';
 import { parseAddress, type ParsedAddress } from '@blink/zcash';
@@ -209,8 +209,7 @@ export default function ScanPage() {
   }
 
   return (
-    <Shell>
-      <TopBar network={network} />
+    <AppFrame>
       <form className="stack" onSubmit={handleParse}>
         <div className="stack stack--sm" style={{ textAlign: 'center' }}>
           <p className="kicker">Check a payment request</p>
@@ -222,7 +221,7 @@ export default function ScanPage() {
         </div>
 
         {/* Elegant Scanner Frame / Video View */}
-        <div className="card card--accent center" style={{ padding: '24px 20px', background: 'var(--surface-solid)' }}>
+        <div className="card center" style={{ padding: '24px 20px' }}>
           {scanning ? (
             <div style={{ position: 'relative', borderRadius: 20, overflow: 'hidden', margin: '0 auto 16px', maxWidth: 280 }}>
               <video ref={videoRef} style={{ width: '100%', height: 'auto', display: 'block' }} />
@@ -245,7 +244,7 @@ export default function ScanPage() {
                 border: '2px dashed var(--accent)',
                 display: 'grid',
                 placeItems: 'center',
-                boxShadow: '0 0 30px var(--accent-glow)',
+                boxShadow: '0 0 30px rgba(176, 125, 22, 0.18)',
                 position: 'relative',
                 overflow: 'hidden',
               }}
@@ -342,6 +341,6 @@ export default function ScanPage() {
       ) : null}
 
       <p className="footer-note">Scanning never sends funds automatically</p>
-    </Shell>
+    </AppFrame>
   );
 }

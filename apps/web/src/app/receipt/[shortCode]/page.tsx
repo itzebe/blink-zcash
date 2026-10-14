@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { privacyHeadline } from '@blink/shared';
-import { Shell, TopBar, Alert, Row } from '@/components/Shell';
+import { AppFrame, Alert, Row, NetworkPill } from '@/components/Shell';
 import { PrivacyPanel } from '@/components/PrivacyPanel';
 import { useConnection } from '@/components/ConnectionProvider';
 import { api, ApiError, type Receipt } from '@/lib/api';
@@ -63,8 +63,7 @@ export default function ReceiptPage({ params }: { params: Promise<{ shortCode: s
   }
 
   return (
-    <Shell>
-      <TopBar network={receipt ? receipt.network : null} />
+    <AppFrame>
       <div className="stack">
         <div className="stack stack--sm center">
           {receipt ? (
@@ -81,6 +80,10 @@ export default function ReceiptPage({ params }: { params: Promise<{ shortCode: s
               <h1>Receipt</h1>
             </>
           )}
+        </div>
+
+        <div style={{ textAlign: 'center' }}>
+          <NetworkPill network={receipt ? receipt.network : null} />
         </div>
 
         {loading ? (
@@ -144,6 +147,6 @@ export default function ReceiptPage({ params }: { params: Promise<{ shortCode: s
         ) : null}
       </div>
       <p className="footer-note">BLINK does not claim selective disclosure for shielded payments</p>
-    </Shell>
+    </AppFrame>
   );
 }
