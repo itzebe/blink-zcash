@@ -184,10 +184,14 @@ test.describe('privacy, payment links and receipts', () => {
     await expect(page.getByText(/anonymous/i)).toHaveCount(0);
   });
 
-  test('a transparent request is labelled a public payment, never shielded', async ({
+  test('a transparent recipient is refused, never turned into a payment request', async ({
     page,
     request,
   }) => {
+    // BLINK is shielded-first: a transparent-only recipient is rejected outright
+    // rather than turned into a "public payment" request. The previous version of
+    // this test expected a `.privacy--transparent` label, which described
+    // behaviour the product intentionally removed.
     const created = await request.post(`${apiBase()}/v1/payment-requests`, {
       data: {
         recipientName: 'Joseph',
@@ -196,12 +200,26 @@ test.describe('privacy, payment links and receipts', () => {
         expiryMinutes: 30,
       },
     });
-    const { shortCode } = (await created.json()) as { shortCode };
 
-    await page.goto(`/pay/${shortCode}`);
-    await expect(page.locator('.privacy--transparent')).toBeVisible();
-    await expect(page.locator('.privacy__headline')).toHaveText(/Public payment/);
-    await expect(page.getByText('Shielded payment')).toHaveCount(0);
+    // The API refuses it with a specific, honest error and creates nothing.
+    expect(created.status()).toBe(400);
+    const body = (await created.json()) as { error?: string; shortCode?: string };
+    expect(body.error).toBe('transparent_recipient');
+    expect(body.shortCode).toBeUndefined();
+
+    // The request screen refuses the same address before submission, so a
+    // transparent recipient is never presented as a (shielded) payment request.
+    await page.goto('/request');
+    // Prove the app is ready first, so the disabled state below is attributable
+    // to the address, not to a still-connecting backend.
+    await expect(page.getByRole('button', { name: /create payment/i })).toBeEnabled();
+    await page.getByLabel('Your Zcash address').fill(TEST_TRANSPARENT);
+    await expect(page.locator('.alert--error')).toContainText(/shielded-only/i);
+    await expect(page.getByRole('button', { name: /create payment/i })).toBeDisabled();
+    // No privacy panel at all: the route is neither claimed shielded nor
+    // mislabelled public.
+    await expect(page.locator('.privacy--shielded')).toHaveCount(0);
+    await expect(page.locator('.privacy__headline')).toHaveCount(0);
   });
 
   test('an invalid payment link shows a clear not-found state', async ({ page }) => {

@@ -19,6 +19,13 @@ describe('loadConfig verification guardrails', () => {
     expect(config.ZCASH_NETWORK).toBe('testnet');
   });
 
+  it('bounds the engine wake wait above the engine cold-start time', () => {
+    const config = loadConfig(base);
+    // Must exceed the measured ~81s cold start, else a waking engine would be
+    // reported as unavailable.
+    expect(config.BLINK_ZCASH_WAKE_TIMEOUT_MS).toBeGreaterThan(81_000);
+  });
+
   it('refuses lightwalletd without an endpoint', () => {
     expect(() =>
       loadConfig({ ...base, BLINK_VERIFICATION_PROVIDER: 'lightwalletd' }),

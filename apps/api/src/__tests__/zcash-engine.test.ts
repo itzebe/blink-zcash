@@ -57,7 +57,7 @@ describe('createZcashEngine', () => {
         }),
       );
     });
-    const engine = createZcashEngine(url);
+    const engine = createZcashEngine(url, 10_000, 0);
     const result = await engine.inspectAddress(ADDRESS, 'mainnet');
     expect(result.authoritative).toBe(true);
     expect(result.value.kind).toBe('unified');
@@ -77,7 +77,7 @@ describe('createZcashEngine', () => {
       res.writeHead(422, { 'content-type': 'application/json' });
       res.end(JSON.stringify({ error: 'invalid address: Not a Zcash address', kind: 'invalid_address' }));
     });
-    const engine = createZcashEngine(url);
+    const engine = createZcashEngine(url, 10_000, 0);
     await expect(engine.inspectAddress('nope', 'mainnet')).rejects.toThrow(
       /invalid address: Not a Zcash address/,
     );
@@ -104,7 +104,7 @@ describe('createZcashEngine', () => {
         );
       });
     });
-    const engine = createZcashEngine(url);
+    const engine = createZcashEngine(url, 10_000, 0);
     const result = await engine.inspectTransaction('deadbeef', {
       network: 'testnet',
       expectedAddress: 'ztestsapling1example',
@@ -124,7 +124,7 @@ describe('createZcashEngine', () => {
       res.writeHead(404, { 'content-type': 'text/html; charset=utf-8' });
       res.end('<!DOCTYPE html><html><body>Not Found</body></html>');
     });
-    const engine = createZcashEngine(url);
+    const engine = createZcashEngine(url, 10_000, 0);
     const error = await engine.inspectAddress(ADDRESS, 'mainnet').catch((e: unknown) => e);
     expect(error).toBeInstanceOf(EngineUnavailableError);
     expect((error as Error).message).toMatch(/non-JSON response/);
@@ -132,7 +132,7 @@ describe('createZcashEngine', () => {
   });
 
   it('reports a connection failure as unreachable', async () => {
-    const engine = createZcashEngine('http://127.0.0.1:1');
+    const engine = createZcashEngine('http://127.0.0.1:1', 10_000, 0);
     await expect(engine.inspectAddress(ADDRESS, 'mainnet')).rejects.toThrow(
       /blink-zcash service unreachable/,
     );
@@ -145,7 +145,7 @@ describe('createZcashEngine classification and ping', () => {
       res.writeHead(422, { 'content-type': 'application/json' });
       res.end(JSON.stringify({ error: 'invalid address', kind: 'invalid_address' }));
     });
-    const engine = createZcashEngine(url);
+    const engine = createZcashEngine(url, 10_000, 0);
     const error = await engine.inspectAddress(ADDRESS, 'mainnet').catch((e: unknown) => e);
     expect(error).toBeInstanceOf(EngineUnavailableError);
     expect((error as EngineUnavailableError).reason).toBe('rejected');
@@ -156,7 +156,7 @@ describe('createZcashEngine classification and ping', () => {
       res.writeHead(503, { 'content-type': 'application/json' });
       res.end(JSON.stringify({ error: 'starting up' }));
     });
-    const engine = createZcashEngine(url);
+    const engine = createZcashEngine(url, 10_000, 0);
     const error = await engine.inspectAddress(ADDRESS, 'mainnet').catch((e: unknown) => e);
     expect(error).toBeInstanceOf(EngineUnavailableError);
     expect((error as EngineUnavailableError).reason).toBe('unreachable');
@@ -167,7 +167,7 @@ describe('createZcashEngine classification and ping', () => {
       res.writeHead(200, { 'content-type': 'application/json' });
       res.end(JSON.stringify({ status: 'ok', service: 'blink-zcash' }));
     });
-    const engine = createZcashEngine(url);
+    const engine = createZcashEngine(url, 10_000, 0);
     await expect(engine.ping()).resolves.toBe(true);
   });
 
@@ -179,5 +179,59 @@ describe('createZcashEngine classification and ping', () => {
   it('reports ping false when no engine is configured', async () => {
     const engine = createZcashEngine('');
     await expect(engine.ping()).resolves.toBe(false);
+  });
+
+  it('waits for a cold engine to become healthy before the first authoritative call', async () => {
+    let healthCalls = 0;
+    const url = await startServer((req, res) => {
+      if (req.url === '/health') {
+        healthCalls += 1;
+        // Cold for the first two probes, then healthy: the wake wait must keep
+        // polling instead of giving up immediately.
+        if (healthCalls <= 2) {
+          res.writeHead(503, { 'content-type': 'application/json' });
+          res.end(JSON.stringify({ status: 'starting' }));
+          return;
+        }
+        res.writeHead(200, { 'content-type': 'application/json' });
+        res.end(JSON.stringify({ status: 'ok' }));
+        return;
+      }
+      res.writeHead(200, { 'content-type': 'application/json' });
+      res.end(
+        JSON.stringify({
+          address: ADDRESS,
+          kind: 'unified',
+          network: 'mainnet',
+          can_receive_memo: true,
+          receivers: {
+            transparent: false,
+            sapling: false,
+            orchard: true,
+            shielded: true,
+            transparent_only: false,
+            unknown: false,
+          },
+        }),
+      );
+    });
+    const engine = createZcashEngine(url, 5_000, 10_000);
+    const result = await engine.inspectAddress(ADDRESS, 'mainnet');
+    expect(result.value.kind).toBe('unified');
+    // The engine was actually probed more than once before the call succeeded.
+    expect(healthCalls).toBeGreaterThanOrEqual(3);
+  });
+
+  it('fails honestly when the engine never wakes within the budget', async () => {
+    const url = await startServer((_req, res) => {
+      res.writeHead(503, { 'content-type': 'application/json' });
+      res.end(JSON.stringify({ status: 'starting' }));
+    });
+    // A tiny wake budget keeps the test fast; the call must still surface the
+    // honest transient failure rather than inventing a result.
+    const engine = createZcashEngine(url, 500, 600);
+    const error = await engine.inspectAddress(ADDRESS, 'mainnet').catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(EngineUnavailableError);
+    expect((error as EngineUnavailableError).reason).toBe('unreachable');
   });
 });

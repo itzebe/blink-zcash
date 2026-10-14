@@ -47,7 +47,12 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<BuiltApp>
   const { db, pool } = options.db ? { db: options.db, pool: null } : createDb(config.DATABASE_URL);
 
   const engine =
-    options.engine ?? createZcashEngine(config.BLINK_ZCASH_SERVICE_URL, config.BLINK_ZCASH_TIMEOUT_MS);
+    options.engine ??
+    createZcashEngine(
+      config.BLINK_ZCASH_SERVICE_URL,
+      config.BLINK_ZCASH_TIMEOUT_MS,
+      config.BLINK_ZCASH_WAKE_TIMEOUT_MS,
+    );
   const provider =
     options.provider ??
     createVerificationProvider({
