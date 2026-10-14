@@ -400,13 +400,17 @@ export function privacyHeadlineSentence(capability: PrivacyCapability): string {
 }
 
 /**
- * The one thing Zcash protocol privacy does NOT cover: information BLINK itself
- * handles. Stated wherever privacy is explained, so the app never implies the
- * whole request is private. The recipient address is encrypted at rest and kept
- * out of the link, but the memo is plaintext and the request itself is a BLINK
- * record.
+ * The two things privacy-at-the-protocol does NOT cover, stated wherever privacy
+ * is explained so the app never implies the whole request is private. First, what
+ * BLINK itself handles: the recipient address is encrypted at rest and kept out of
+ * the share link, but the memo is plaintext and the request itself is a BLINK
+ * record. Second, and just as important, what the payment protocol hands to the
+ * payer: a ZIP 321 request delivers the recipient address to the payer's wallet, so
+ * the payer can read it. BLINK does not hide the recipient address from the payer.
  */
 export const BLINK_APP_PRIVACY_NOTE =
   'Zcash keeps the payment private on-chain. BLINK itself still stores this request: ' +
   'the recipient address is encrypted at rest and never appears in the share link, ' +
-  'but the memo is stored and shown in plaintext. BLINK never holds your funds or keys.';
+  'but the memo is stored and shown in plaintext. To pay, the request still hands ' +
+  'the recipient address to the payer\u2019s wallet, so the payer can read it — BLINK ' +
+  'does not hide the recipient address from the payer. BLINK never holds your funds or keys.';

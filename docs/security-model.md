@@ -18,6 +18,8 @@ BLINK protects, what it does not, and why.
 | Asset | Where it lives | Protection |
 | --- | --- | --- |
 | Recipient address | Database, encrypted | AES-256-GCM under `BLINK_ENCRYPTION_KEY` |
+| ZIP 321 URI (embeds the address) | **Not persisted** | Reconstructed on demand from the encrypted address |
+| Memo | Database, **plaintext** | Not encrypted; shown and encoded in the clear (ZIP 321 memos are plaintext) |
 | Private keys / seed phrases | **Nowhere** | BLINK never receives them |
 | Management token | Recipient's browser only | Hash-compared server-side; required to cancel |
 | Short link | Public | 64 bits CSPRNG; safe to share |
@@ -60,6 +62,14 @@ BLINK protects, what it does not, and why.
 
 ### Not addressed (and stated plainly)
 
+- **The payer can read the recipient address.** A ZIP 321 request hands the
+  recipient address to the payer's wallet, because the payer's wallet must know
+  the destination to build the payment. BLINK keeps the address out of the share
+  link, stores it encrypted at rest, and refuses a transparent-capable recipient,
+  but it does **not** hide the recipient address from the payer. Hiding the
+  destination from the party who authorizes the payment is a distinct property
+  that no standard Zcash payment protocol currently provides. BLINK must never
+  claim it.
 - **Shielded-payment proof.** For shielded recipients, sender, amount and
   recipient are private. BLINK cannot prove them from public data. Without a
   viewing key or lightwalletd integration, BLINK can only confirm that a reported

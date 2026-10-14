@@ -392,6 +392,21 @@ export default function LitepaperPage() {
             is hidden. If the payer spends from a transparent address, that side remains public
             on-chain even when the recipient is shielded.
           </p>
+
+          <h3>What BLINK does not hide from the payer</h3>
+          <p>
+            Hiding the recipient from the payer is a different property, and BLINK does not claim
+            it. A ZIP 321 request hands the recipient address to the payer&apos;s wallet, because the
+            payer&apos;s wallet must know the destination to build the payment. Anyone who opens the
+            payment link, or scans the QR code, can read the recipient address in the request — even
+            though BLINK keeps that address out of the link itself, stores it encrypted at rest, and
+            refuses any recipient that could settle transparently.
+          </p>
+          <p>
+            BLINK therefore protects the recipient from <em>public</em> observers and from BLINK&apos;s own
+            records, not from the payer. No standard Zcash payment protocol hides the destination
+            from the party who authorizes the payment.
+          </p>
         </section>
 
         {/* 7 ------------------------------------------------------------- */}

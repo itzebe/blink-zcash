@@ -26,6 +26,43 @@ These are enforced in code and in tests, not just documented:
 6. **Short links are unguessable.** They use 64 bits of CSPRNG entropy, never
    sequential ids, and are safe to share.
 
+## What is and is not encrypted at rest
+
+Only the **recipient address** is encrypted at rest. The recipient address is
+AES-256-GCM under `BLINK_ENCRYPTION_KEY`, and the ZIP 321 URI — which embeds that
+address — is **not persisted**: it is reconstructed on demand from the encrypted
+address when the payer opens the request. BLINK does not claim that all request
+data is encrypted.
+
+The **memo is plaintext**. ZIP 321 memos are plaintext on-chain, and BLINK
+stores, displays and encodes the memo in the clear. A shielded memo is encrypted
+on the Zcash blockchain by the protocol, but BLINK itself holds no viewing key
+and stores the memo unencrypted. Do not put a secret in a memo.
+
+## What BLINK does not hide from the payer
+
+BLINK does **not** hide the recipient address from the payer. A ZIP 321 request
+delivers the recipient address to the payer's wallet, because the payer's wallet
+must know the destination to construct the payment. Anyone who opens the payment
+link, or scans the QR code, can read the recipient address in the request, even
+though:
+
+- the address never appears in the share link (the link carries only a short code),
+- the address is encrypted at rest, and
+- a transparent-capable recipient is rejected.
+
+These four properties are distinct and must never be conflated:
+
+| Property | BLINK status |
+| --- | --- |
+| Address protected at rest | Yes (AES-256-GCM) |
+| Address omitted from the public share link | Yes (short code only) |
+| Address not displayed as text in BLINK's own interface | Yes (shown only in the optional "View details" disclosure) |
+| Address hidden from the payer's wallet | **No** — the payer's wallet receives it to pay |
+
+No standard Zcash payment protocol hides the destination from the party who
+authorizes the payment; see `docs/shielded-payment-limits.md`.
+
 ## Reporting a vulnerability
 
 Please do not open a public issue for a security problem. Report it privately to

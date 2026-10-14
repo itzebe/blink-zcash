@@ -212,9 +212,18 @@ export async function registerRoutes(app: FastifyInstance, deps: RouteDeps): Pro
       if (fresh.status === 'EXPIRED') {
         return reply.code(410).send({ error: 'expired', message: 'payment request expired' });
       }
+      // The URI is reconstructed here from the encrypted address; it is never
+      // read back from storage, so no persisted copy can leak the address.
+      const zip321Uri = await service.zip321UriFor(fresh);
+      if (!zip321Uri) {
+        return reply.code(409).send({
+          error: 'payment_details_unavailable',
+          message: 'the payment request could not be reconstructed for this deployment',
+        });
+      }
       return reply.send({
         shortCode: fresh.shortCode,
-        zip321Uri: fresh.zip321Uri,
+        zip321Uri,
         addressKind: fresh.recipientAddressKind,
         addressFingerprint: fresh.recipientAddressFingerprint,
         network: fresh.network,

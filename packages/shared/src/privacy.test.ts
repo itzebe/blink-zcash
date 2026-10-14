@@ -226,4 +226,12 @@ describe('BLINK_APP_PRIVACY_NOTE', () => {
     // Never claims the whole request is private or anonymous.
     expect(note).not.toContain('anonymous');
   });
+
+  it('states the payer-facing limit: the request is handed to the payer wallet', () => {
+    const note = BLINK_APP_PRIVACY_NOTE.toLowerCase();
+    // The address is delivered to the payer's wallet to pay.
+    expect(note).toContain('wallet');
+    // BLINK does not claim to hide the address from the payer.
+    expect(note).toMatch(/does not hide the recipient address from the payer/);
+  });
 });

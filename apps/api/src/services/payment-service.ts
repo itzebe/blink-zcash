@@ -93,6 +93,17 @@ export interface PaymentServiceOptions {
   generateCode?: () => string;
 }
 
+/**
+ * A stored payment request plus its ZIP 321 URI, reconstructed on demand.
+ *
+ * The URI is never persisted (it would embed the recipient address in the
+ * clear), so callers that need to hand a payer something they can pay — the
+ * create response and `/payment-details` — receive it alongside the row. Every
+ * other read uses the plain row and never sees an address.
+ */
+export type PaymentRequestRow = typeof paymentRequests.$inferSelect;
+export type PaymentRequestWithUri = PaymentRequestRow & { zip321Uri: string };
+
 export interface VerificationOutcome {
   status: PaymentStatus;
   txid: string | null;
@@ -435,6 +446,8 @@ export class PaymentService {
     // ever describe a shielded-only route.
     const privacy = withUnifiedReceivers(privacyCapability(kind), shieldedReceivers);
 
+    // Validate the route by building the URI once, but do NOT persist it: the URI
+    // embeds the recipient address, so it is reconstructed on demand instead.
     const uri = await this.buildUri(input.recipientAddress, canonicalAmount, memo, label, message);
 
     const now = this.now();
@@ -464,7 +477,7 @@ export class PaymentService {
         message,
         network: this.opts.network,
         privacy,
-        zip321Uri: uri,
+        zip321Uri: null,
         status: 'WAITING_FOR_PAYMENT',
         ownerId: input.ownerId ?? null,
         expiresAt,
@@ -473,7 +486,31 @@ export class PaymentService {
 
     const row = inserted[0]!;
     await this.recordEvent(row.id, 'CREATED', { shortCode: code, network: this.opts.network });
-    return row;
+    return { ...row, zip321Uri: uri };
+  }
+
+  /**
+   * Reconstruct the ZIP 321 URI for a stored request from the decrypted recipient
+   * address and the authoritative fields. The URI is never read back from the
+   * database — `zip321_uri` is only ever NULL for rows written by this code — so a
+   * persisted copy can never leak the recipient address.
+   *
+   * Returns `null` when the address cannot be decrypted (e.g. a key rotation):
+   * the caller must treat that as "cannot hand out a payment request", never fall
+   * back to a stored value.
+   */
+  async zip321UriFor(row: PaymentRequestRow): Promise<string | null> {
+    let address: string;
+    try {
+      address = this.opts.crypto.decrypt(row.recipientAddressEncrypted);
+    } catch {
+      return null;
+    }
+    try {
+      return await this.buildUri(address, row.amount, row.memo, row.label, row.message);
+    } catch {
+      return null;
+    }
   }
 
   private async uniqueCode(): Promise<string> {

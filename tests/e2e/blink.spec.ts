@@ -144,6 +144,15 @@ test.describe('BLINK core flow', () => {
     await expect(panel.locator('.privacy__fact--varies')).toContainText(/depends on payer/i);
     // BLINK must never claim more privacy than the protocol provides.
     await expect(page.getByText(/anonymous/i)).toHaveCount(0);
+    // The payer-facing limit is stated: BLINK does not hide the address from the payer.
+    await expect(page.locator('.privacy__app-note')).toContainText(
+      /does not hide the recipient address from the payer/i,
+    );
+    // The raw recipient address is not rendered in the visible interface (it is
+    // only inside the collapsed "View details" disclosure, which the payer must
+    // open on purpose). innerText excludes collapsed <details> content.
+    const visibleText = await page.locator('body').innerText();
+    expect(visibleText).not.toContain(TEST_SAPLING);
   });
 
   test('use-case modes prefill the same request flow', async ({ page }) => {
@@ -310,6 +319,81 @@ test.describe('cold-start resilience', () => {
     await page.goto('/request');
     await expect(page.getByRole('button', { name: /connecting/i })).toBeDisabled();
     await expect(page.getByRole('button', { name: /create payment/i })).toBeEnabled();
+  });
+});
+
+test.describe('merchant checkout', () => {
+  test('a merchant creates a shielded-only charge and sees the QR, link and honest status', async ({
+    page,
+  }) => {
+    await page.goto('/checkout');
+    // Merchant identity lives behind a disclosure; open it before filling.
+    await page.getByText('Merchant details').click();
+
+    // Native ZEC amount so the flow needs no live price provider.
+    await page.locator('label[for="checkout-currency-ZEC"]').click();
+    await page.locator('#amount').fill('12.5');
+    await page.getByLabel('Reference (optional)').fill('Order 128');
+    await page.getByLabel('Business or your name').fill('Corner Cafe');
+    await page.getByLabel('Your Zcash address').fill(TEST_SAPLING);
+    await page.getByRole('button', { name: /start charge/i }).click();
+
+    // The QR encodes the payment request itself, not a web link.
+    await expect(page.getByAltText(/ZIP 321 payment request QR code/i)).toBeVisible();
+    // The share link must never contain the raw address.
+    const copy = page.getByRole('button', { name: /copy link/i });
+    await expect(copy).toBeVisible();
+    // Status is honest: nothing observed yet, never "confirmed".
+    await expect(page.getByText(/no payment has been observed/i)).toBeVisible();
+    await expect(page.getByText(/payment received/i)).toHaveCount(0);
+    // No shareable surface (link href, QR label) carries the raw address; the
+    // creator's own "Details" disclosure is the only place the URI may appear.
+    await expect(page.locator('a[href*="ztestsapling"]')).toHaveCount(0);
+    await expect(page.getByAltText(/ZIP 321 payment request QR code/i)).toHaveAttribute(
+      'src',
+      /^data:image/,
+    );
+  });
+
+  test('refuses a transparent recipient before a charge can start', async ({ page }) => {
+    await page.goto('/checkout');
+    await page.getByText('Merchant details').click();
+    await page.getByLabel('Your Zcash address').fill('tmEZhbWHTpdKMw5it8YDspUXSMGQyFwovpU');
+    await expect(page.getByText(/shielded-only recipient/i)).toBeVisible();
+    await expect(page.getByRole('button', { name: /start charge/i })).toBeDisabled();
+  });
+
+  test('the workspace lists a request created in this browser', async ({ page, request }) => {
+    const apiBase = process.env.E2E_API_URL ?? 'http://localhost:4000';
+    const created = await request.post(`${apiBase}/v1/payment-requests`, {
+      data: {
+        recipientName: 'Joseph',
+        recipientAddress: TEST_SAPLING,
+        amount: '3',
+        expiryMinutes: 30,
+      },
+    });
+    expect(created.ok()).toBeTruthy();
+    const { shortCode } = (await created.json()) as { shortCode: string };
+
+    // The workspace is a per-device list; seed it the way the checkout page does.
+    await page.goto('/merchant');
+    await page.evaluate(
+      (code) =>
+        window.localStorage.setItem(
+          'blink:workspace:requests',
+          JSON.stringify([
+            { shortCode: code, label: 'Corner Cafe', createdAt: new Date().toISOString() },
+          ]),
+        ),
+      shortCode,
+    );
+    await page.reload();
+
+    await expect(page.getByText(shortCode)).toBeVisible();
+    await expect(page.getByText(/waiting for payment/i)).toBeVisible();
+    // No account system, no balances: the workspace says so.
+    await expect(page.getByText(/no balance/i)).toBeVisible();
   });
 });
 

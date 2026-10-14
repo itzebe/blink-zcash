@@ -2,14 +2,15 @@
 
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
-import { convertUsdToZec, settledZecAmount, privacyCapability, shieldedOnlyPolicy, withUnifiedReceivers, type PrivacyCapability, type PaymentPurpose } from '@blink/shared';
-import { parseAddress } from '@blink/zcash';
+import { convertUsdToZec, settledZecAmount, type PaymentPurpose } from '@blink/shared';
 import { AppFrame, Alert } from '@/components/Shell';
 import { BlinkPaymentCard } from '@/components/BlinkPaymentCard';
 import { PrivacyPanel } from '@/components/PrivacyPanel';
 import { useConnection } from '@/components/ConnectionProvider';
 import { api, ApiError, type CreatedPaymentRequest } from '@/lib/api';
 import { purposeLabel } from '@/lib/status';
+import { previewRecipient } from '@/lib/privacy-preview';
+import { addWorkspaceEntry, saveManagementToken } from '@/lib/workspace';
 
 const EXPIRY_OPTIONS = [
   { value: 10, label: '10 min' },
@@ -104,33 +105,6 @@ function previewZec(usd: string, price: string | null): string | null {
   }
 }
 
-/**
- * Best-effort client-side preview of the recipient route. The server recomputes
- * and stores the authoritative capability at creation; this is only so the
- * recipient sees — before they submit — whether BLINK's shielded-only policy
- * would accept the address. It applies the exact same policy as the API, so a
- * mixed (transparent-bearing) or unconfirmable address is shown as rejected
- * rather than described as shielded.
- */
-function previewPrivacy(
-  address: string,
-  network: 'testnet' | 'mainnet',
-): { privacy: PrivacyCapability | null; rejected: boolean } {
-  if (!address.trim()) return { privacy: null, rejected: false };
-  try {
-    const parsed = parseAddress(address.trim());
-    if (parsed.network !== network) return { privacy: null, rejected: false };
-    const verdict = shieldedOnlyPolicy(parsed.receivers);
-    if (!verdict.ok) return { privacy: null, rejected: true };
-    return {
-      privacy: withUnifiedReceivers(privacyCapability(parsed.kind), verdict.receivers),
-      rejected: false,
-    };
-  } catch {
-    return { privacy: null, rejected: false };
-  }
-}
-
 export default function RequestPage() {
   const { network, ready } = useConnection();
   const [recipientName, setRecipientName] = useState('');
@@ -150,7 +124,7 @@ export default function RequestPage() {
   const [created, setCreated] = useState<CreatedPaymentRequest | null>(null);
   const [copied, setCopied] = useState(false);
 
-  const privacyPreview = network ? previewPrivacy(recipientAddress, network) : null;
+  const privacyPreview = network ? previewRecipient(recipientAddress, network) : null;
   const recipientRejected = privacyPreview?.rejected ?? false;
 
   function applyMode(next: UseCaseMode) {
@@ -214,11 +188,14 @@ export default function RequestPage() {
         expiryMinutes,
       });
       setCreated(result);
-      try {
-        window.localStorage.setItem(`blink:manage:${result.shortCode}`, result.managementToken);
-      } catch {
-        /* storage may be unavailable; not fatal */
-      }
+      // Remember this request in the per-device merchant workspace so the owner
+      // can review and cancel it later without an account.
+      saveManagementToken(result.shortCode, result.managementToken);
+      addWorkspaceEntry({
+        shortCode: result.shortCode,
+        label: result.request.recipientName || 'Payment request',
+        createdAt: result.request.createdAt,
+      });
     } catch (err) {
       // A cold backend is recoverable, not a dead end: say what happened and
       // that retrying will work, instead of a raw provider message.
@@ -522,6 +499,7 @@ export default function RequestPage() {
               payment publicly on-chain. Use a Sapling address or a shielded-only Unified Address.
             </Alert>
           ) : null}
+          {privacyPreview?.error ? <Alert kind="warn">{privacyPreview.error}</Alert> : null}
         </div>
 
         <button
@@ -539,6 +517,9 @@ export default function RequestPage() {
         ) : null}
       </form>
       <p className="footer-note">BLINK never asks for your seed phrase or spending key</p>
+      <p className="tiny muted center" style={{ marginTop: 8 }}>
+        Your requests are kept in this browser. <Link href="/merchant">Open your workspace</Link>.
+      </p>
     </AppFrame>
   );
 }

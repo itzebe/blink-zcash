@@ -84,8 +84,14 @@ export const paymentRequests = pgTable(
      * wording can never drift to over-claim privacy.
      */
     privacy: jsonb('privacy'),
-    /** The ZIP 321 URI. Contains the address, so access is controlled. */
-    zip321Uri: text('zip321_uri').notNull(),
+    /**
+     * Legacy plaintext ZIP 321 URI. Historical rows may hold the recipient
+     * address in the clear here; new rows leave it NULL and the URI is
+     * reconstructed on demand from the encrypted address + fields. Kept as a
+     * nullable column only so the migration can blank historical values without
+     * a destructive drop while old and new application versions overlap.
+     */
+    zip321Uri: text('zip321_uri'),
     status: text('status').notNull().default('CREATED'),
     /**
      * The txid reported by the payer's wallet. This is an untrusted claim: it is
