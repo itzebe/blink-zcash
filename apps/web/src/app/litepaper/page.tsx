@@ -317,9 +317,9 @@ export default function LitepaperPage() {
           <h3>Paying</h3>
           <p>
             When the payer continues, BLINK hands over the ZIP 321 payment request and the
-            payer&apos;s wallet opens to approve it. BLINK does not sign and does not broadcast. If
-            the wallet does not open, the payer can copy the payment request and paste it into a
-            wallet manually.
+            payer&apos;s wallet opens to approve it. BLINK does not construct, sign, or broadcast
+            the transaction; the wallet does all three. If the wallet does not open, the payer can
+            copy the payment request and paste it into a wallet manually.
           </p>
 
           <h3>Checking the evidence</h3>
@@ -367,9 +367,11 @@ export default function LitepaperPage() {
           <h3>What this does not prove</h3>
           <p>
             A shielded-compatible recipient address does not, by itself, prove that the payer used
-            a shielded receiver. BLINK can confirm that the address you gave has shielded
-            receivers, but it cannot control or see which receiver the payer&apos;s wallet chose.
-            BLINK states this on every request rather than implying the whole payment is private.
+            a shielded receiver, and it does not make every aspect of the payment private. BLINK
+            can confirm that the address you gave has shielded receivers, but it cannot control or
+            see which receiver the payer&apos;s wallet chose. A payer who spends from a transparent
+            address leaves that side public on-chain. BLINK states this on every request rather
+            than implying the whole payment is private.
           </p>
 
           <h3>Two layers of privacy</h3>
@@ -537,6 +539,15 @@ export default function LitepaperPage() {
             One limitation is stated openly rather than hidden: memos are plaintext. BLINK stores,
             shows, and encodes the memo in the clear. Only the recipient address is encrypted at
             rest. BLINK never describes a memo as protected.
+          </p>
+          <p>
+            A second disclosure is specific to the payer flow. To actually pay, a wallet needs the
+            recipient address. BLINK therefore returns the full ZIP 321 payment URI — which
+            contains the recipient address — from{' '}
+            <code>/v1/payment-requests/&lt;shortCode&gt;/payment-details</code>. Anyone who
+            possesses the short code can retrieve it. The share link itself never contains the
+            address, but the short code is the access control, so a payment link should be treated
+            as sensitive and shared only with the intended payer.
           </p>
         </section>
 
