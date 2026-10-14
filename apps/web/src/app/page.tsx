@@ -43,11 +43,11 @@ export default function HomePage() {
                 encrypted on the server and never appears in the link you share.
               </p>
               <div className="hero__actions">
-                <Link className="btn btn--primary" href="/request">
-                  Create a payment request
+                <Link className="btn btn--primary" href="/checkout">
+                  Start a checkout
                 </Link>
-                <Link className="btn btn--ghost" href="/litepaper">
-                  Read the Litepaper
+                <Link className="btn btn--ghost" href="/request">
+                  Create a payment request
                 </Link>
               </div>
               <div className="trust-row">
@@ -317,6 +317,58 @@ export default function HomePage() {
                 route stated up front.
               </p>
             </div>
+          </div>
+        </section>
+
+        {/* Merchant ----------------------------------------------------- */}
+        <section className="section">
+          <div className="section__head">
+            <p className="kicker">For merchants</p>
+            <h2 className="section__title">Take a payment at the counter</h2>
+            <p className="section__lede">
+              A checkout built for a phone on a counter: enter an amount, show the QR code, and
+              watch one screen for the real status. Every request you create is kept in this
+              browser so you can review it later.
+            </p>
+          </div>
+          <div className="features">
+            <div className="feature">
+              <span className="feature__icon" aria-hidden="true">
+                ⚡
+              </span>
+              <p className="feature__title">Fast checkout</p>
+              <p className="feature__desc">
+                Enter an amount in USD or ZEC and present the ZIP 321 QR code to the payer.
+              </p>
+            </div>
+            <div className="feature">
+              <span className="feature__icon" aria-hidden="true">
+                ◉
+              </span>
+              <p className="feature__title">Honest status</p>
+              <p className="feature__desc">
+                The screen separates a payer-reported id from a transaction BLINK actually
+                observed, and never shows a sale as confirmed before it is.
+              </p>
+            </div>
+            <div className="feature">
+              <span className="feature__icon" aria-hidden="true">
+                ▤
+              </span>
+              <p className="feature__title">Your workspace</p>
+              <p className="feature__desc">
+                Review the requests this browser created, share them, and open a receipt once a
+                payment is confirmed.
+              </p>
+            </div>
+          </div>
+          <div className="btn-row" style={{ marginTop: 20 }}>
+            <Link className="btn btn--primary" href="/checkout">
+              Open merchant checkout
+            </Link>
+            <Link className="btn btn--ghost" href="/merchant">
+              View your workspace
+            </Link>
           </div>
         </section>
 

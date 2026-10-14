@@ -166,6 +166,19 @@ Rust checks used in CI: `cargo fmt --all -- --check`,
   Always wrap: `(handler, ms) => setTimeout(handler, ms)`.
 - **Memos are plaintext** (stored, shown, and encoded in the ZIP 321 URI). Only
   the recipient address is encrypted at rest. Never claim memos are encrypted.
+- **The payer can read the recipient address — BLINK does not hide it from the
+  payer.** A ZIP 321 request hands the address to the payer's wallet, because the
+  wallet must know the destination to build a shielded output (the note key is
+  ephemeral-static ECDH over the recipient's address). Do not conflate four
+  distinct properties: encrypted at rest, omitted from the share link, not shown
+  as text in BLINK's UI, and hidden from the payer's wallet. BLINK delivers only
+  the first three; the fourth has no standard Zcash primitive (no Zcash stealth
+  address / payment-code standard exists — BIP 47/352 are Bitcoin, ZecAuth is an
+  unimplemented proposal). The only way to hide the destination from the payer is
+  a custodial forwarding service, which BLINK rejects. This limit is stated in
+  `SECURITY.md`, `docs/security-model.md`, `docs/shielded-payment-limits.md`, the
+  litepaper, and `BLINK_APP_PRIVACY_NOTE` (`.privacy__app-note` on the payer
+  page). Never claim sender-side address confidentiality.
 - **Local `npm ci` needs `NODE_ENV=development`** (or `--include=dev`); the shell
   here exports `NODE_ENV=production`, which skips vitest/eslint. `unset NODE_ENV`
   before `next build`, or the prerender fails with a misleading `<Html>` error.

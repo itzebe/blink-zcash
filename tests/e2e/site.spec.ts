@@ -10,7 +10,7 @@ import { test, expect } from '@playwright/test';
 test.describe('litepaper', () => {
   test('is reachable from the home page hero', async ({ page }) => {
     await page.goto('/');
-    await page.getByRole('link', { name: 'Read the Litepaper' }).click();
+    await page.getByRole('link', { name: /privacy model/i }).click();
     await expect(page).toHaveURL(/\/litepaper$/);
     await expect(
       page.getByRole('heading', { level: 1, name: /private zcash payment requests/i }),

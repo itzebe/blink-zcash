@@ -65,6 +65,13 @@ ALTER TABLE payment_requests ADD COLUMN IF NOT EXISTS privacy jsonb;
 ALTER TABLE payment_requests ADD COLUMN IF NOT EXISTS purpose text NOT NULL DEFAULT 'invoice';
 -- Additive migration for the honest shielded-payment verification result.
 ALTER TABLE payment_requests ADD COLUMN IF NOT EXISTS shielded_verification jsonb;
+-- Privacy remediation: the ZIP 321 URI must not persist the recipient address in
+-- the clear. New rows store NULL here and the URI is reconstructed on demand from
+-- the encrypted address + fields. Make the column nullable (for databases created
+-- before this change) and blank any historical plaintext values. Idempotent: a
+-- row is only touched while it still holds a value, so re-running is safe.
+ALTER TABLE payment_requests ALTER COLUMN zip321_uri DROP NOT NULL;
+UPDATE payment_requests SET zip321_uri = NULL WHERE zip321_uri IS NOT NULL;
 
 CREATE TABLE IF NOT EXISTS payment_events (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -116,10 +123,33 @@ export async function migrate(connectionString: string): Promise<void> {
   });
   await client.connect();
   try {
+    // The DDL (including the idempotent `zip321_uri` null-out) runs as a single
+    // statement batch, so PostgreSQL applies it atomically: if the remediation
+    // fails, nothing is committed and no row is left half-migrated.
     await client.query(DDL);
+    await reportRemediation(client);
   } finally {
     await client.end();
   }
+}
+
+/**
+ * Report the outcome of the plaintext-URI remediation without printing any
+ * address or URI. Emits counts only, so the migration log never becomes a source
+ * of the exposure it is removing.
+ */
+async function reportRemediation(client: pg.Client): Promise<void> {
+  const { rows } = await client.query<{ total: string; plaintext_uris: string }>(
+    `SELECT
+       count(*)::text AS total,
+       count(*) FILTER (WHERE zip321_uri IS NOT NULL)::text AS plaintext_uris
+     FROM payment_requests`,
+  );
+  const total = rows[0]?.total ?? '0';
+  const plaintext = rows[0]?.plaintext_uris ?? '0';
+  console.log(
+    `Privacy remediation: ${total} payment request(s); ${plaintext} still hold a plaintext URI.`,
+  );
 }
 
 const isDirectRun =

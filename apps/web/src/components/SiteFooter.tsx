@@ -26,8 +26,14 @@ export function SiteFooter() {
 
         <nav className="app-footer__col" aria-label="Product">
           <p className="app-footer__title">Product</p>
+          <Link className="app-footer__link" href="/checkout">
+            Merchant checkout
+          </Link>
           <Link className="app-footer__link" href="/request">
             Create a payment request
+          </Link>
+          <Link className="app-footer__link" href="/merchant">
+            Merchant workspace
           </Link>
           <Link className="app-footer__link" href="/scan">
             Check a payment request
