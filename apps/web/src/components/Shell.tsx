@@ -1,8 +1,32 @@
 import type { ReactNode } from 'react';
 import Link from 'next/link';
+import { SiteHeader } from './SiteHeader';
+import { SiteFooter } from './SiteFooter';
 
 export function Shell({ children, wide = false }: { children: ReactNode; wide?: boolean }) {
   return <main className={wide ? 'shell shell--wide' : 'shell'}>{children}</main>;
+}
+
+/**
+ * The standard page frame: the shared site header, the page content, and the
+ * shared footer. Pages that want the full application chrome (home, litepaper,
+ * request, scan, receipt) use this; the payment pages that are opened from a
+ * shared link render their own minimal layout.
+ */
+export function AppFrame({
+  children,
+  wide = false,
+}: {
+  children: ReactNode;
+  wide?: boolean;
+}) {
+  return (
+    <div className="app">
+      <SiteHeader />
+      <Shell wide={wide}>{children}</Shell>
+      <SiteFooter />
+    </div>
+  );
 }
 
 /**

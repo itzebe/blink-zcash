@@ -2,85 +2,113 @@
 
 import { useState } from 'react';
 import Link from 'next/link';
-import { Shell, TopBar } from '@/components/Shell';
+import { AppFrame, NetworkPill } from '@/components/Shell';
 import { BlinkPaymentCard } from '@/components/BlinkPaymentCard';
 import { useConnection } from '@/components/ConnectionProvider';
 
+/**
+ * The homepage. It explains the product in the order a new visitor needs:
+ * what BLINK is, how a payment link works, why the recipient policy is
+ * shielded-first, and how (and how far) BLINK can verify a payment.
+ *
+ * Nothing here invents activity: the preview is a real component with example
+ * values, and the copy matches the shipped behaviour.
+ */
 export default function HomePage() {
-  // The confirmed network, or null until the API answers. The badge shows a
-  // neutral label rather than guessing a network.
+  // The confirmed network, or null until the API answers. The preview badge
+  // shows a neutral label rather than guessing a network.
   const { network } = useConnection();
   const [demoAmount, setDemoAmount] = useState('0.25');
-  const [demoMemo, setDemoMemo] = useState('Coffee & croissant');
+  const [demoMemo, setDemoMemo] = useState('Coffee');
 
   return (
-    <Shell>
-      <TopBar network={network} />
-
-      <div className="stack" style={{ gap: 32 }}>
-        <div className="stack stack--sm" style={{ textAlign: 'center' }}>
-          <p className="kicker">Private payments</p>
-          <h1 style={{ fontSize: 'clamp(32px, 8vw, 48px)' }}>
-            Send money.
-            <br />
-            <span style={{ color: 'var(--accent)' }}>Not your wallet address.</span>
-          </h1>
-          <p className="lede" style={{ maxWidth: 440, margin: '0 auto' }}>
-            BLINK turns any Zcash payment into a private digital link. Non-custodial, ZIP 321
-            compliant, and honest about privacy: shielded when your address is shielded.
-          </p>
-        </div>
-
-        {/* Central Interactive Payment Card */}
-        <BlinkPaymentCard
-          amount={demoAmount || '0.00'}
-          currency="ZEC"
-          memo={demoMemo}
-          recipientName="Joseph"
-          network={network}
-          actions={
-            <>
-              <Link className="btn btn--primary" href="/request">
-                Request
-              </Link>
-              <Link className="btn btn--ghost" href="/scan">
-                Pay / Scan
-              </Link>
-            </>
-          }
-        >
-          <div style={{ marginTop: 20, paddingTop: 16, borderTop: '1px solid var(--border)' }}>
-            <div className="field">
-              <span className="field__label">Try interactive preview</span>
-              <div className="btn-row" style={{ marginTop: 4 }}>
-                <button
-                  type="button"
-                  className="btn btn--ghost btn--small"
-                  onClick={() => {
-                    setDemoAmount('0.10');
-                    setDemoMemo('Coffee');
-                  }}
-                >
-                  0.10 ZEC · Coffee
-                </button>
-                <button
-                  type="button"
-                  className="btn btn--ghost btn--small"
-                  onClick={() => {
-                    setDemoAmount('1.50');
-                    setDemoMemo('Dinner');
-                  }}
-                >
-                  1.50 ZEC · Dinner
-                </button>
+    <AppFrame wide>
+      <div className="stack stack--lg">
+        {/* Hero ---------------------------------------------------------- */}
+        <section className="hero">
+          <div className="hero__grid">
+            <div>
+              <span className="hero__eyebrow">
+                Shielded-first Zcash payments
+                <NetworkPill network={network} />
+              </span>
+              <h1 className="hero__title">
+                Send money privately.
+                <br />
+                Share a <em>simple link</em>.
+              </h1>
+              <p className="hero__lede">
+                BLINK helps you create and share Zcash payment requests, with a shielded-first
+                approach to privacy and transaction verification. The recipient address stays
+                encrypted on the server and never appears in the link you share.
+              </p>
+              <div className="hero__actions">
+                <Link className="btn btn--primary" href="/request">
+                  Create a payment request
+                </Link>
+                <Link className="btn btn--ghost" href="/litepaper">
+                  Read the Litepaper
+                </Link>
+              </div>
+              <div className="trust-row">
+                <span className="trust-item">Non-custodial — never holds your funds</span>
+                <span className="trust-item">Built on the ZIP 321 standard</span>
+                <span className="trust-item">No account or seed phrase required</span>
               </div>
             </div>
-          </div>
-        </BlinkPaymentCard>
 
-        {/* How it works visual loop */}
-        <div className="stack stack--sm">
-          <p className="kicker">Request · Share · Scan · Pay</p>
+            <div className="hero__preview">
+              <BlinkPaymentCard
+                amount={demoAmount}
+                currency="ZEC"
+                memo={demoMemo}
+                recipientName="Your name"
+                network={network}
+              >
+                <div className="stack stack--sm" style={{ marginTop: 18 }}>
+                  <span className="field__label" style={{ color: 'var(--on-navy-muted)' }}>
+                    Example request — try it
+                  </span>
+                  <div className="btn-row">
+                    <button
+                      type="button"
+                      className="btn btn--ghost btn--small"
+                      onClick={() => {
+                        setDemoAmount('0.10');
+                        setDemoMemo('Coffee');
+                      }}
+                    >
+                      0.10 ZEC · Coffee
+                    </button>
+                    <button
+                      type="button"
+                      className="btn btn--ghost btn--small"
+                      onClick={() => {
+                        setDemoAmount('1.50');
+                        setDemoMemo('Dinner');
+                      }}
+                    >
+                      1.50 ZEC · Dinner
+                    </button>
+                  </div>
+                </div>
+              </BlinkPaymentCard>
+            </div>
+          </div>
+        </section>
+
+        {/* What BLINK is ------------------------------------------------- */}
+        <section className="section">
+          <div className="section__head">
+            <p className="kicker">What BLINK is</p>
+            <h2 className="section__title">A payment request, not a wallet</h2>
+            <p className="section__lede">
+              BLINK is a non-custodial interface for requesting Zcash. You describe the payment,
+              BLINK encodes it as a standard <code>zcash:</code> request, and you share a short
+              link. BLINK never holds funds, keys, or seed phrases.
+            </p>
+          </div>
+
           <div className="actions">
             <div className="action">
               <span className="action__icon" aria-hidden="true">
@@ -89,7 +117,8 @@ export default function HomePage() {
               <div>
                 <span className="action__title">Create Request</span>
                 <span className="action__desc" style={{ display: 'block' }}>
-                  Set an amount and optional memo. Your recipient address stays encrypted on the server.
+                  Set an amount and an optional memo. Your recipient address is encrypted at rest
+                  and never appears in the shareable link.
                 </span>
               </div>
             </div>
@@ -100,7 +129,8 @@ export default function HomePage() {
               <div>
                 <span className="action__title">Share Payment Link</span>
                 <span className="action__desc" style={{ display: 'block' }}>
-                  Send the generated short link in chat or present the ZIP 321 QR code.
+                  Send the generated short link, or present the ZIP 321 QR code for a wallet to
+                  scan. The QR encodes the payment request itself, not a web page.
                 </span>
               </div>
             </div>
@@ -111,68 +141,197 @@ export default function HomePage() {
               <div>
                 <span className="action__title">Pay Privately</span>
                 <span className="action__desc" style={{ display: 'block' }}>
-                  The payer opens their Zcash wallet and approves the payment. Shielded addresses
-                  keep the recipient and amount private.
+                  The payer approves the payment inside their own Zcash wallet. BLINK never signs
+                  or sends a transaction.
                 </span>
               </div>
             </div>
           </div>
-        </div>
+        </section>
 
-        {/* Real-World Use Cases */}
-        <div className="stack stack--sm">
-          <p className="kicker">Shielded Use Cases</p>
-          <div className="card stack stack--sm">
-            <div className="row" style={{ paddingTop: 0 }}>
-              <div>
-                <strong style={{ display: 'block', fontSize: 15 }}>Point of Sale</strong>
-                <span className="tiny muted">
-                  Merchant creates a short-expiry request → customer scans the QR → instant payment
-                </span>
-              </div>
+        {/* Full lifecycle, including verification ------------------------ */}
+        <section className="section">
+          <div className="section__head">
+            <p className="kicker">From request to verified payment</p>
+            <h2 className="section__title">Four steps, and an honest check</h2>
+            <p className="section__lede">
+              Request creation, payment, blockchain confirmation and verification are separate
+              stages. BLINK keeps them separate too, so a submitted transaction is never shown as
+              a confirmed payment.
+            </p>
+          </div>
+          <div className="flow">
+            <div className="flow__step">
+              <span className="flow__num">01</span>
+              <p className="flow__title">Create a payment request</p>
+              <p className="flow__desc">
+                BLINK validates the recipient address and builds a ZIP 321 URI with the amount and
+                optional memo.
+              </p>
             </div>
-            <div className="row">
-              <div>
-                <strong style={{ display: 'block', fontSize: 15 }}>Remittance &amp; Sharing</strong>
-                <span className="tiny muted">
-                  Send a payment link in messaging apps without revealing wallet addresses
-                </span>
-              </div>
+            <div className="flow__step">
+              <span className="flow__num">02</span>
+              <p className="flow__title">Share the link</p>
+              <p className="flow__desc">
+                Anyone with the link opens a confirmation page that states what the route protects
+                before anything is paid.
+              </p>
             </div>
-            <div className="row">
-              <div>
-                <strong style={{ display: 'block', fontSize: 15 }}>Private Payroll &amp; Invoicing</strong>
-                <span className="tiny muted">
-                  Request exact amounts with a memo attached to the payment request
-                </span>
-              </div>
+            <div className="flow__step">
+              <span className="flow__num">03</span>
+              <p className="flow__title">The payer pays</p>
+              <p className="flow__desc">
+                The payer approves the payment in their wallet. BLINK hands over the payment
+                request; it cannot move funds.
+              </p>
             </div>
-            <div className="row">
-              <div>
-                <strong style={{ display: 'block', fontSize: 15 }}>Subscriptions</strong>
-                <span className="tiny muted">
-                  Issue a fresh recurring request each period — never an automatic charge
-                </span>
-              </div>
+            <div className="flow__step">
+              <span className="flow__num">04</span>
+              <p className="flow__title">BLINK checks the evidence</p>
+              <p className="flow__desc">
+                BLINK observes the transaction through a configured provider and reports only what
+                it can actually establish.
+              </p>
             </div>
           </div>
-        </div>
+        </section>
 
-        {/* Built on Zcash section */}
-        <div className="card card--accent center stack stack--sm" style={{ padding: '24px 20px' }}>
-          <p className="kicker" style={{ color: 'var(--accent)' }}>Built on Zcash Protocol</p>
-          <h2 style={{ fontSize: 18 }}>Shielded Payment Infrastructure</h2>
-          <p className="tiny muted" style={{ maxWidth: 420, margin: '0 auto' }}>
-            Zcash provides zero-knowledge cryptography that protects financial privacy. BLINK adds a
-            clean payment request layer using the ZIP 321 standard, and states the actual privacy of
-            each route rather than over-promising.
+        {/* Shielded-first and verification ------------------------------- */}
+        <section className="section">
+          <div className="section__head">
+            <p className="kicker">Why shielded-first</p>
+            <h2 className="section__title">Privacy the protocol can actually deliver</h2>
+            <p className="section__lede">
+              On Zcash, a shielded recipient and amount are protected on-chain. BLINK refuses a
+              recipient that can only be paid transparently, because that would expose the payment
+              publicly.
+            </p>
+          </div>
+          <div className="features">
+            <div className="feature">
+              <span className="feature__icon" aria-hidden="true">
+                ◈
+              </span>
+              <p className="feature__title">Shielded recipients only</p>
+              <p className="feature__desc">
+                A transparent address, or a Unified Address that also exposes a transparent
+                receiver, is rejected in the primary flow. BLINK will not hand a payer an address
+                that could settle publicly.
+              </p>
+            </div>
+            <div className="feature">
+              <span className="feature__icon" aria-hidden="true">
+                ⌗
+              </span>
+              <p className="feature__title">Standard ZIP 321 requests</p>
+              <p className="feature__desc">
+                Amounts and memos follow the ZIP 321 payment-request format, so a compatible wallet
+                can read the request directly. There is no proprietary payment format.
+              </p>
+            </div>
+            <div className="feature">
+              <span className="feature__icon" aria-hidden="true">
+                ✓
+              </span>
+              <p className="feature__title">Verification that stays honest</p>
+              <p className="feature__desc">
+                BLINK reports a payment as confirmed only after a configured provider observes the
+                transaction at the required depth. A transaction id on its own never confirms a
+                payment.
+              </p>
+            </div>
+            <div className="feature">
+              <span className="feature__icon" aria-hidden="true">
+                ⛓
+              </span>
+              <p className="feature__title">Non-custodial by design</p>
+              <p className="feature__desc">
+                BLINK never asks for a seed phrase or spending key, never signs, and never
+                broadcasts. The payer keeps full control in their own wallet.
+              </p>
+            </div>
+          </div>
+        </section>
+
+        {/* Privacy and its limits ---------------------------------------- */}
+        <section className="section">
+          <div className="card card--pad-lg">
+            <p className="kicker">What privacy means here</p>
+            <h2 className="section__title" style={{ marginTop: 8 }}>
+              Shielded-first, and clear about the limits
+            </h2>
+            <div className="stack stack--sm" style={{ marginTop: 16 }}>
+              <p className="lede">
+                A shielded recipient address does not, by itself, prove that the payer used a
+                shielded receiver. A compatible wallet is free to choose which receiver it pays.
+                BLINK can confirm that a shielded receiver exists in the address you gave, but not
+                that the payer used it.
+              </p>
+              <p className="lede">
+                On-chain, Zcash protects a shielded recipient and amount. BLINK itself still stores
+                the request: the recipient address is encrypted at rest and kept out of the link,
+                but the memo is stored and shown in plaintext.
+              </p>
+              <Link className="btn btn--ghost" href="/litepaper" style={{ width: 'auto' }}>
+                Read the full privacy model →
+              </Link>
+            </div>
+          </div>
+        </section>
+
+        {/* Use cases ----------------------------------------------------- */}
+        <section className="section">
+          <div className="section__head">
+            <p className="kicker">Potential use cases</p>
+            <h2 className="section__title">Where a payment link fits</h2>
+            <p className="section__lede">
+              These are realistic applications of the existing product, not claims about current
+              adoption.
+            </p>
+          </div>
+          <div className="features">
+            <div className="feature">
+              <p className="feature__title">Freelance and invoicing</p>
+              <p className="feature__desc">
+                Request an exact amount with a memo for reference, and share one link per invoice.
+              </p>
+            </div>
+            <div className="feature">
+              <p className="feature__title">Donations</p>
+              <p className="feature__desc">
+                Publish a request so supporters can pay without seeing your wallet address in the
+                link.
+              </p>
+            </div>
+            <div className="feature">
+              <p className="feature__title">Online commerce</p>
+              <p className="feature__desc">
+                A short-expiry request for a point-of-sale or checkout flow, paid by scanning the
+                QR code.
+              </p>
+            </div>
+            <div className="feature">
+              <p className="feature__title">Peer-to-peer requests</p>
+              <p className="feature__desc">
+                Ask a friend for a specific amount over a messaging app, with the privacy of the
+                route stated up front.
+              </p>
+            </div>
+          </div>
+        </section>
+
+        {/* CTA ----------------------------------------------------------- */}
+        <section className="cta-band">
+          <h2>Create your first payment request</h2>
+          <p>
+            No account, no seed phrase, no custody. Build a ZIP 321 request in a few seconds and
+            share the link.
           </p>
-        </div>
-
-        <p className="footer-note">
-          Non-custodial · BLINK never holds your funds or spending keys
-        </p>
+          <Link className="btn btn--accent" href="/request">
+            Create a payment request
+          </Link>
+        </section>
       </div>
-    </Shell>
+    </AppFrame>
   );
 }

@@ -4,7 +4,7 @@ import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { convertUsdToZec, settledZecAmount, privacyCapability, shieldedOnlyPolicy, withUnifiedReceivers, type PrivacyCapability, type PaymentPurpose } from '@blink/shared';
 import { parseAddress } from '@blink/zcash';
-import { Shell, TopBar, Alert } from '@/components/Shell';
+import { AppFrame, Alert } from '@/components/Shell';
 import { BlinkPaymentCard } from '@/components/BlinkPaymentCard';
 import { PrivacyPanel } from '@/components/PrivacyPanel';
 import { useConnection } from '@/components/ConnectionProvider';
@@ -261,8 +261,7 @@ export default function RequestPage() {
 
   if (created) {
     return (
-      <Shell>
-        <TopBar network={created.request.network} />
+      <AppFrame>
         <div className="stack">
           <div className="stack stack--sm" style={{ textAlign: 'center' }}>
             <p className="kicker">{purposeLabel(created.request.purpose)}</p>
@@ -328,13 +327,12 @@ export default function RequestPage() {
           </p>
         </div>
         <p className="footer-note">Non-custodial · BLINK never holds your funds</p>
-      </Shell>
+      </AppFrame>
     );
   }
 
   return (
-    <Shell>
-      <TopBar network={network} />
+    <AppFrame>
       <form className="stack" onSubmit={submit}>
         <div className="stack stack--sm">
           <p className="kicker">Request payment</p>
@@ -541,6 +539,6 @@ export default function RequestPage() {
         ) : null}
       </form>
       <p className="footer-note">BLINK never asks for your seed phrase or spending key</p>
-    </Shell>
+    </AppFrame>
   );
 }

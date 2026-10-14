@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
-import { Shell, TopBar, Alert, Row, StatusBadge } from '@/components/Shell';
+import { AppFrame, Alert, Row, StatusBadge } from '@/components/Shell';
 import { BlinkPaymentCard } from '@/components/BlinkPaymentCard';
 import { PrivacyPanel } from '@/components/PrivacyPanel';
 import { useConnection } from '@/components/ConnectionProvider';
@@ -20,7 +20,7 @@ type Phase =
   | { name: 'paid' };
 
 export default function PayPage({ params }: { params: Promise<{ shortCode: string }> }) {
-  const { network: connectedNetwork, ready } = useConnection();
+  const { ready } = useConnection();
   const [shortCode, setShortCode] = useState<string | null>(null);
   const [request, setRequest] = useState<PublicPaymentRequest | null>(null);
   const [details, setDetails] = useState<PaymentDetails | null>(null);
@@ -165,19 +165,17 @@ export default function PayPage({ params }: { params: Promise<{ shortCode: strin
 
   if (phase.name === 'loading') {
     return (
-      <Shell>
-        <TopBar network={connectedNetwork} />
+      <AppFrame>
         <p className="lede">
           {ready ? 'Loading payment request…' : 'Connecting to the BLINK service…'}
         </p>
-      </Shell>
+      </AppFrame>
     );
   }
 
   if (phase.name === 'error' && !request) {
     return (
-      <Shell>
-        <TopBar network={connectedNetwork} />
+      <AppFrame>
         <div className="stack">
           <div className="stack stack--sm">
             <p className="kicker">Payment request</p>
@@ -188,7 +186,7 @@ export default function PayPage({ params }: { params: Promise<{ shortCode: strin
             Create a new request
           </Link>
         </div>
-      </Shell>
+      </AppFrame>
     );
   }
 
@@ -197,8 +195,7 @@ export default function PayPage({ params }: { params: Promise<{ shortCode: strin
 
   if (phase.name === 'paid') {
     return (
-      <Shell>
-        <TopBar network={network} />
+      <AppFrame>
         <div className="stack center">
           <div className="success-mark" aria-hidden="true">
             ✓
@@ -233,15 +230,14 @@ export default function PayPage({ params }: { params: Promise<{ shortCode: strin
             View receipt
           </Link>
         </div>
-      </Shell>
+      </AppFrame>
     );
   }
 
   if (phase.name === 'done') {
     const verified = statusIsVerified(request.status);
     return (
-      <Shell>
-        <TopBar network={network} />
+      <AppFrame>
         <div className="stack">
           <div className="stack stack--sm">
             <p className="kicker">Transaction recorded</p>
@@ -270,14 +266,13 @@ export default function PayPage({ params }: { params: Promise<{ shortCode: strin
             checking.
           </Alert>
         </div>
-      </Shell>
+      </AppFrame>
     );
   }
 
   if (phase.name === 'claim') {
     return (
-      <Shell>
-        <TopBar network={network} />
+      <AppFrame>
         <form className="stack" onSubmit={submitTxid}>
           <div className="stack stack--sm">
             <p className="kicker">Payment sent?</p>
@@ -317,14 +312,13 @@ export default function PayPage({ params }: { params: Promise<{ shortCode: strin
             Back
           </button>
         </form>
-      </Shell>
+      </AppFrame>
     );
   }
 
   if (phase.name === 'processing') {
     return (
-      <Shell>
-        <TopBar network={network} />
+      <AppFrame>
         <div className="stack">
           <div className="stack stack--sm">
             <p className="kicker">Payment processing</p>
@@ -339,14 +333,13 @@ export default function PayPage({ params }: { params: Promise<{ shortCode: strin
             I sent it — enter transaction id
           </button>
         </div>
-      </Shell>
+      </AppFrame>
     );
   }
 
   if (phase.name === 'confirm') {
     return (
-      <Shell>
-        <TopBar network={network} />
+      <AppFrame>
         <div className="stack">
           <div className="stack stack--sm">
             <p className="kicker">Confirm payment</p>
@@ -377,14 +370,13 @@ export default function PayPage({ params }: { params: Promise<{ shortCode: strin
             Your wallet will ask you to approve. BLINK cannot move funds on your behalf.
           </p>
         </div>
-      </Shell>
+      </AppFrame>
     );
   }
 
   // Ready
   return (
-    <Shell>
-      <TopBar network={network} />
+    <AppFrame>
       <div className="stack">
         <div className="stack stack--sm" style={{ textAlign: 'center' }}>
           <p className="kicker">{purposeLabel(request.purpose)}</p>
@@ -452,6 +444,6 @@ export default function PayPage({ params }: { params: Promise<{ shortCode: strin
           Non-custodial · BLINK never holds your funds or spending keys
         </p>
       </div>
-    </Shell>
+    </AppFrame>
   );
 }

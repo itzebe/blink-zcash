@@ -1,32 +1,89 @@
+/*
+ * BLINK design tokens.
+ *
+ * A restrained, professional identity: midnight navy for brand and structure,
+ * soft neutral surfaces for readability, and a single gold accent reserved for
+ * primary actions and key highlights. Status colours are chosen for contrast on
+ * light surfaces.
+ *
+ * Every component style reads from these tokens, so the palette can change in
+ * one place.
+ */
 :root {
-  --bg: #080a0f;
-  --surface: rgba(18, 22, 32, 0.72);
-  --surface-solid: #121620;
-  --surface-2: rgba(26, 32, 46, 0.65);
-  --surface-2-solid: #1a202e;
-  --border: rgba(255, 255, 255, 0.08);
-  --border-light: rgba(255, 255, 255, 0.14);
-  --text: #f8fafc;
-  --muted: #94a3b8;
-  --muted-2: #64748b;
+  /* Surfaces ---------------------------------------------------------- */
+  --bg: #f6f7fa; /* soft neutral page background */
+  --bg-elevated: #ffffff;
+  --surface: #ffffff;
+  --surface-solid: #ffffff;
+  --surface-2: #f1f3f8; /* subtle inset panels, inputs */
+  --surface-2-solid: #f1f3f8;
+  --surface-3: #e9edf4; /* hover / pressed */
+  --surface-inverse: #0b1b33; /* midnight navy */
 
-  --accent: #f4b728;
-  --accent-strong: #ffd15c;
-  --accent-ink: #181305;
-  --accent-glow: rgba(244, 183, 40, 0.35);
-  --accent-bg: rgba(244, 183, 40, 0.08);
+  /* Brand ------------------------------------------------------------- */
+  --navy: #0b1b33;
+  --navy-2: #14305a;
+  --navy-3: #2a4f86;
+  --navy-soft: #eef2f9;
 
-  --success: #4ade80;
-  --success-bg: rgba(74, 222, 128, 0.1);
-  --danger: #ff5c5c;
-  --danger-bg: rgba(255, 92, 92, 0.1);
-  --info: #38bdf8;
-  --info-bg: rgba(56, 189, 248, 0.1);
+  /* Text -------------------------------------------------------------- */
+  --text: #0f1c2e; /* near-navy body ink, ~14:1 on white */
+  --text-strong: #08111f;
+  --muted: #55617a; /* secondary text, ~6.3:1 on white */
+  --muted-2: #7c8699; /* tertiary / labels, ~4.6:1 on white */
+  --on-navy: #f4f7fb;
+  --on-navy-muted: #aebbd0;
 
-  --radius-lg: 24px;
-  --radius: 18px;
-  --radius-sm: 12px;
+  /* Accent (restrained Zcash-inspired gold) --------------------------- */
+  --accent: #b07d16; /* gold with contrast for text and borders on white */
+  --accent-strong: #96690f;
+  --accent-soft: #f6ead0;
+  --accent-ink: #1c1403; /* ink on a gold fill */
+  --accent-line: rgba(176, 125, 22, 0.35);
+  --accent-glow: rgba(176, 125, 22, 0.22);
+  --accent-bg: #f6ead0;
 
-  --font-sans: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
-  --font-mono: 'JetBrains Mono', ui-monospace, 'SFMono-Regular', Menlo, Consolas, monospace;
+  /* Borders ----------------------------------------------------------- */
+  --border: #e2e6ee;
+  --border-strong: #cfd6e2;
+  --border-light: #eef1f6;
+
+  /* Status ------------------------------------------------------------ */
+  --success: #15803d;
+  --success-bg: #e8f5ec;
+  --warn: #b45309;
+  --warn-bg: #fdf1e3;
+  --danger: #b91c1c;
+  --danger-bg: #fdecec;
+  --info: #1d4ed8;
+  --info-bg: #eaf0fd;
+
+  /* Shape ------------------------------------------------------------- */
+  --radius-lg: 18px;
+  --radius: 12px;
+  --radius-sm: 9px;
+  --radius-pill: 999px;
+
+  /* Elevation (subtle, no glass) -------------------------------------- */
+  --shadow-sm: 0 1px 2px rgba(15, 28, 46, 0.06);
+  --shadow: 0 6px 20px -10px rgba(15, 28, 46, 0.18);
+  --shadow-lg: 0 18px 44px -20px rgba(15, 28, 46, 0.28);
+
+  /* Spacing scale ----------------------------------------------------- */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 24px;
+  --space-6: 32px;
+  --space-7: 48px;
+  --space-8: 64px;
+
+  /* Typography -------------------------------------------------------- */
+  --font-sans: 'Inter', ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont,
+    'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+  --font-mono: ui-monospace, 'SFMono-Regular', 'JetBrains Mono', Menlo, Consolas,
+    monospace;
+
+  --measure: 68ch; /* readable line length for long-form prose */
 }
