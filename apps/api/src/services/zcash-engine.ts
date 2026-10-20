@@ -81,6 +81,66 @@ export interface InspectTransactionOptions {
   branch?: string;
 }
 
+/**
+ * The engine's honest, viewing-key-backed result of checking whether a
+ * transaction actually paid the intended shielded recipient.
+ *
+ * Mirrors `blink_zcash::ShieldedPaymentVerification` exactly. A viewing key can
+ * only *detect* incoming notes; it cannot spend. The engine sets
+ * `recipientVerified` only when a recovered note's recipient equals the exact
+ * requested address byte-for-byte, and only when the decoded bytes match the
+ * expected transaction id — so an unrelated mined transaction can never satisfy
+ * a claim.
+ */
+export interface ShieldedPaymentVerification {
+  /** The txid computed from the bytes (never trusted from input). */
+  txid: string;
+  /**
+   * Whether the computed txid equals the expected txid. `true` when none was
+   * supplied. A `false` value means no recipient match may be credited.
+   */
+  txidMatches: boolean;
+  /** Whether a recovered note's recipient equals the requested address. */
+  recipientVerified: boolean;
+  /** Total zatoshis recovered to the requested recipient, across all pools.
+   * Reported as 0 unless `txidMatches` is true. */
+  recipientZatoshis: number;
+  /** Whether the recovered amount equals the requested amount. */
+  amountVerified: boolean;
+  /** The requested amount in zatoshis, when one was supplied. */
+  expectedZatoshis: number | null;
+  /** Whether the transaction carried Sapling activity. */
+  sapling: boolean;
+  /** Whether the transaction carried Orchard activity. */
+  orchard: boolean;
+  /** The pools in which a note to the requested recipient was recovered. */
+  poolsWithRecipientNotes: string[];
+  /** Whether the viewing key carried a Sapling component. */
+  keyHasSapling: boolean;
+  /** Whether the viewing key carried an Orchard component. */
+  keyHasOrchard: boolean;
+}
+
+export interface VerifyShieldedOptions {
+  network: ZcashNetwork;
+  /**
+   * The recipient's Unified viewing key (`uivk…`/`uview…`, or their `…test`
+   * forms). A viewing key can only detect incoming notes; it cannot spend.
+   * Server-side only: never logged and never returned to a client.
+   */
+  viewingKey: string;
+  /** The expected recipient address. A note is attributed only on an exact match. */
+  expectedAddress: string;
+  /**
+   * The requested amount in zatoshis. When supplied, the engine reports whether
+   * the recovered amount matches exactly (a short payment is not a match).
+   */
+  expectedZatoshis?: number;
+  /** The expected txid. Binds the decoded bytes to the request's claim. */
+  expectedTxid?: string;
+  branch?: string;
+}
+
 export interface ZcashEngine {
   readonly configured: boolean;
   /**
@@ -117,6 +177,19 @@ export interface ZcashEngine {
     dataHex: string,
     options: InspectTransactionOptions,
   ): Promise<EngineResult<TransactionEvidence>>;
+  /**
+   * Establish, from the raw transaction bytes, whether the transaction actually
+   * paid the intended shielded recipient — by trial-decrypting the transaction's
+   * shielded outputs with the recipient's viewing key. This is the only path by
+   * which BLINK can prove a *specific* shielded recipient received a *specific*
+   * amount. It never fabricates a match: a wrong recipient, a wrong amount, a
+   * mismatched txid, or a transaction with no note to the recipient all yield
+   * `recipientVerified: false`.
+   */
+  verifyShielded(
+    dataHex: string,
+    options: VerifyShieldedOptions,
+  ): Promise<EngineResult<ShieldedPaymentVerification>>;
 }
 
 /**
@@ -406,6 +479,64 @@ export function createZcashEngine(
           recipientHasTransparent: json.recipient_has_transparent,
           recipientHasShielded: json.recipient_has_shielded,
           transparentRecipientZatoshis: json.transparent_recipient_zatoshis,
+        },
+        authoritative: true,
+      };
+    },
+
+    async verifyShielded(dataHex, options) {
+      if (!configured) {
+        throw new EngineUnavailableError('BLINK_ZCASH_SERVICE_URL is not configured');
+      }
+      const json = await call<Record<string, unknown>>('/v1/transaction/verify-shielded', {
+        data: dataHex,
+        network: options.network,
+        viewing_key: options.viewingKey,
+        expected_address: options.expectedAddress,
+        ...(options.expectedZatoshis !== undefined
+          ? { expected_zatoshis: options.expectedZatoshis }
+          : {}),
+        ...(options.expectedTxid ? { expected_txid: options.expectedTxid } : {}),
+        ...(options.branch ? { branch: options.branch } : {}),
+      });
+
+      // Validate the engine's response before trusting it. A malformed or
+      // truncated body must fail closed (unavailable), never be coerced into a
+      // successful verification: `Boolean(undefined)` is `false`, but a wrong
+      // shape could otherwise surface as a type-confused record.
+      const txid = json.txid;
+      if (
+        typeof txid !== 'string' ||
+        !/^[0-9a-fA-F]{64}$/.test(txid) ||
+        typeof json.txid_matches !== 'boolean' ||
+        typeof json.recipient_verified !== 'boolean' ||
+        typeof json.amount_verified !== 'boolean' ||
+        typeof json.recipient_zatoshis !== 'number' ||
+        !Number.isInteger(json.recipient_zatoshis) ||
+        json.recipient_zatoshis < 0
+      ) {
+        throw new EngineUnavailableError(
+          'blink-zcash service returned a malformed shielded verification response',
+          'unreachable',
+        );
+      }
+
+      return {
+        value: {
+          txid,
+          txidMatches: json.txid_matches,
+          recipientVerified: json.recipient_verified,
+          recipientZatoshis: json.recipient_zatoshis,
+          amountVerified: json.amount_verified,
+          expectedZatoshis:
+            typeof json.expected_zatoshis === 'number' ? json.expected_zatoshis : null,
+          sapling: json.sapling === true,
+          orchard: json.orchard === true,
+          poolsWithRecipientNotes: Array.isArray(json.pools_with_recipient_notes)
+            ? json.pools_with_recipient_notes.filter((p): p is string => typeof p === 'string')
+            : [],
+          keyHasSapling: json.key_has_sapling === true,
+          keyHasOrchard: json.key_has_orchard === true,
         },
         authoritative: true,
       };

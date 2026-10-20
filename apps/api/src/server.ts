@@ -63,6 +63,9 @@ export async function buildApp(options: BuildAppOptions = {}): Promise<BuiltApp>
       rpcPassword: config.ZCASH_RPC_PASSWORD,
       network: config.ZCASH_NETWORK,
       engine,
+      ...(config.BLINK_RECIPIENT_VIEWING_KEY
+        ? { recipientViewingKey: config.BLINK_RECIPIENT_VIEWING_KEY }
+        : {}),
     });
 
   const priceProvider =

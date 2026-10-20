@@ -13,7 +13,7 @@
  */
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
-import { ALLOWED_EXPIRY_MINUTES, type ShieldedVerificationRecord } from '@blink/shared';
+import { ALLOWED_EXPIRY_MINUTES, readShieldedVerificationRecord, type ShieldedVerificationRecord } from '@blink/shared';
 import { PaymentRequestError } from '../services/payment-service.js';
 import type { ZecUsdPriceProvider } from '../services/price-service.js';
 
@@ -27,6 +27,8 @@ export function receiptStatement(shielded: ShieldedVerificationRecord | null): s
   const provable =
     'BLINK cannot cryptographically prove the sender, recipient or amount of a shielded transaction; those details are private to the parties involved.';
   switch (shielded?.state) {
+    case 'shielded_recipient_verified':
+      return 'This receipt confirms that BLINK observed a confirmed Zcash transaction and verified, using the recipient\u2019s viewing key, that a shielded note paying the exact requested address is present in it. The amount verification is stated separately. A viewing key can only detect incoming notes: BLINK still cannot identify the sender of a shielded transfer.';
     case 'recipient_verified':
       return 'This receipt confirms that BLINK observed a confirmed Zcash transaction that pays the requested recipient. The recipient and amount were publicly verifiable for this transparent-capable address.';
     case 'shielded_activity_observed':
@@ -322,7 +324,7 @@ export async function registerRoutes(app: FastifyInstance, deps: RouteDeps): Pro
         message: 'a receipt is only issued for a confirmed payment',
       });
     }
-    const shielded = fresh.shieldedVerification as ShieldedVerificationRecord | null;
+    const shielded = readShieldedVerificationRecord(fresh.shieldedVerification);
     return reply.send({
       receipt: {
         shortCode: fresh.shortCode,

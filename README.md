@@ -480,10 +480,18 @@ Full detail: [`SECURITY.md`](SECURITY.md) and
 
 - **Verification depends on infrastructure.** BLINK can only confirm a reported
   transaction once it can reach a lightwalletd endpoint (or full node). If none
-  is configured or reachable, BLINK reports `UNKNOWN` and never confirms. Even
-  then, for shielded payments it can only confirm that the transaction exists and
-  is mined to the required depth; it cannot prove amount or parties from public
-  data. It says so rather than guessing.
+  is configured or reachable, BLINK reports `UNKNOWN` and never confirms. It says
+  so rather than guessing.
+- **Shielded-payment proof, with a recipient viewing key.** For shielded
+  recipients, sender, amount and recipient are private to public observers. When
+  an operator provisions `BLINK_RECIPIENT_VIEWING_KEY` (a Unified *viewing* key,
+  never a spending key), BLINK can additionally trial-decrypt an observed
+  transaction and establish that a shielded note pays the **exact requested
+  address**, and whether the recovered amount matched — reported as
+  `shielded_recipient_verified`, with the amount stated separately. Without a
+  key, BLINK can only confirm that a reported transaction has been mined to the
+  required depth, and says so. The key is server-side only, never accepted from a
+  client, never stored, and never placed in a link, URI, QR code or receipt.
 - **`lightwalletd` provider is real but requires an endpoint.** It talks to the
   `CompactTxStreamer` gRPC API, decodes the returned transaction with the
   authoritative Zcash engine to bind the bytes to the claimed txid, and derives
@@ -569,7 +577,7 @@ what is disclosed.
 
 ## 19. Roadmap
 
-- Viewing-key-based note detection (proving amount/recipient for shielded notes).
+- Wallet-side note detection for recipients who cannot share a viewing key.
 - Deep links / detection for specific Zcash wallets.
 - Mainnet hardening and a documented enablement checklist.
 - Selective disclosure via an official Zcash mechanism, clearly documented.

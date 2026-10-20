@@ -47,6 +47,52 @@ describe('loadConfig verification guardrails', () => {
     );
   });
 
+  it('defaults the recipient viewing key to empty (verification disabled)', () => {
+    expect(loadConfig(base).BLINK_RECIPIENT_VIEWING_KEY).toBe('');
+  });
+
+  it('refuses a mainnet-shaped recipient viewing key on testnet', () => {
+    expect(() =>
+      loadConfig({ ...base, BLINK_RECIPIENT_VIEWING_KEY: 'uivk1qqqqqqqq' }),
+    ).toThrow(/testnet Unified viewing key/);
+  });
+
+  it('refuses a testnet-shaped recipient viewing key on mainnet', () => {
+    expect(() =>
+      loadConfig({
+        ...base,
+        NODE_ENV: 'production',
+        ZCASH_NETWORK: 'mainnet',
+        NEXT_PUBLIC_NETWORK: 'mainnet',
+        BLINK_ENCRYPTION_KEY: 'a'.repeat(64),
+        BLINK_VERIFICATION_PROVIDER: 'lightwalletd',
+        BLINK_LIGHTWALLETD_URL: 'https://zec.rocks:443',
+        BLINK_PRICE_PROVIDER: 'none',
+        BLINK_RECIPIENT_VIEWING_KEY: 'uivktest1qqqqqqqq',
+      }),
+    ).toThrow(/mainnet Unified viewing key/);
+  });
+
+  it('accepts a network-matching recipient viewing key', () => {
+    expect(
+      loadConfig({ ...base, BLINK_RECIPIENT_VIEWING_KEY: 'uivktest1qqqqqqqq' })
+        .BLINK_RECIPIENT_VIEWING_KEY,
+    ).toBe('uivktest1qqqqqqqq');
+    expect(
+      loadConfig({
+        ...base,
+        NODE_ENV: 'production',
+        ZCASH_NETWORK: 'mainnet',
+        NEXT_PUBLIC_NETWORK: 'mainnet',
+        BLINK_ENCRYPTION_KEY: 'a'.repeat(64),
+        BLINK_VERIFICATION_PROVIDER: 'lightwalletd',
+        BLINK_LIGHTWALLETD_URL: 'https://zec.rocks:443',
+        BLINK_PRICE_PROVIDER: 'none',
+        BLINK_RECIPIENT_VIEWING_KEY: 'uivk1qqqqqqqq',
+      }).BLINK_RECIPIENT_VIEWING_KEY,
+    ).toBe('uivk1qqqqqqqq');
+  });
+
   it('refuses mainnet with no verification provider in production', () => {
     expect(() =>
       loadConfig({

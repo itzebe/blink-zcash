@@ -6,7 +6,7 @@
  * pulling in any runtime concerns.
  */
 
-import type { PrivacyCapability } from './privacy.js';
+import type { PrivacyCapability, ShieldedVerificationRecord } from './privacy.js';
 
 /** Zcash networks supported by BLINK. */
 export type ZcashNetwork = 'testnet' | 'mainnet';
@@ -287,6 +287,13 @@ export interface PublicPaymentRequest {
    * UI can never claim more privacy than the transaction delivers.
    */
   privacy: PrivacyCapability;
+  /**
+   * What the verification layer was actually able to establish about the
+   * settlement, once it has observed something. `null` until then — the payer
+   * and merchant screens must be able to show *what* was verified, not just that
+   * a status reached CONFIRMED. Written only by the verification layer.
+   */
+  shieldedVerification: ShieldedVerificationRecord | null;
   expiresAt: string;
   createdAt: string;
 }

@@ -9,7 +9,7 @@
  * must never confirm a payment).
  */
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
-import { sql } from 'drizzle-orm';
+import { sql, eq } from 'drizzle-orm';
 import { buildApp, type BuiltApp } from '../server.js';
 import { loadConfig } from '../config.js';
 import type { Observation, VerificationProvider } from '../services/verification-provider.js';
@@ -1468,5 +1468,273 @@ describe('shielded-payment verification distinguishes pools from public bytes', 
     });
     expect(verify.json().verification.shielded.state).toBe('observed');
     expect(verify.json().verification.shielded.recipientVerified).toBe(false);
+  });
+
+  it('exposes the shielded verification level in the public projection (payer/merchant view)', async () => {
+    const { code, txid } = await createAndClaim();
+    // Before any observation, the public projection carries no verification.
+    const before = await built.app.inject({ url: `/v1/payment-requests/${code}` });
+    expect(before.json().request.shieldedVerification).toBeNull();
+
+    provider.next = {
+      txid,
+      confirmations: 3,
+      broadcast: true,
+      source: 'stub',
+      evidence: {
+        txid,
+        size: 1000,
+        pools: { transparent: false, sapling: true, orchard: false, shielded: true },
+        recipientHasTransparent: false,
+        recipientHasShielded: true,
+        transparentRecipientZatoshis: null,
+      },
+    };
+    await built.app.inject({
+      method: 'POST',
+      url: `/v1/payment-requests/${code}/verify`,
+      payload: {},
+    });
+
+    // After the observation, the same public view names the level — never the raw
+    // address or URI, and never a stronger claim than the evidence supports.
+    const after = (await built.app.inject({ url: `/v1/payment-requests/${code}` })).json().request;
+    expect(after.shieldedVerification.state).toBe('shielded_activity_observed');
+    expect(after.shieldedVerification.recipientVerified).toBe(false);
+    expect(after.shieldedVerification.txid).toBe(txid);
+    expect(JSON.stringify(after)).not.toMatch(/zcash:/);
+  });
+
+  it('drops a malformed stored verification blob from the public projection', async () => {
+    const { code, txid } = await createAndClaim();
+    await built.db
+      .update(paymentRequests)
+      .set({ shieldedVerification: { state: 'definitely_shielded' } as never })
+      .where(eq(paymentRequests.shortCode, code));
+    const view = (await built.app.inject({ url: `/v1/payment-requests/${code}` })).json().request;
+    // An unrecognised state is not surfaced as a typed verification result.
+    expect(view.shieldedVerification).toBeNull();
+    void txid;
+  });
+
+  /** An engine-style shielded verification result, with the evidence the test sets. */
+  function shieldedEvidence(
+    txid: string,
+    overrides: Partial<{
+      txidMatches: boolean;
+      recipientVerified: boolean;
+      recipientZatoshis: number;
+      amountVerified: boolean;
+      expectedZatoshis: number | null;
+      pools: { sapling: boolean; orchard: boolean };
+    }> = {},
+  ) {
+    const sapling = overrides.pools?.sapling ?? false;
+    const orchard = overrides.pools?.orchard ?? true;
+    return {
+      txid,
+      txidMatches: overrides.txidMatches ?? true,
+      recipientVerified: overrides.recipientVerified ?? true,
+      recipientZatoshis: overrides.recipientZatoshis ?? 25000000,
+      amountVerified: overrides.amountVerified ?? true,
+      expectedZatoshis: overrides.expectedZatoshis ?? 25000000,
+      sapling,
+      orchard,
+      poolsWithRecipientNotes: orchard ? ['orchard'] : sapling ? ['sapling'] : [],
+      keyHasSapling: sapling,
+      keyHasOrchard: orchard,
+    };
+  }
+
+  it('upgrades to shielded_recipient_verified only on recipient AND amount evidence', async () => {
+    const { code, txid } = await createAndClaim();
+    provider.next = {
+      txid,
+      confirmations: 3,
+      broadcast: true,
+      source: 'stub',
+      evidence: {
+        txid,
+        size: 1000,
+        pools: { transparent: false, sapling: false, orchard: true, shielded: true },
+        recipientHasTransparent: false,
+        recipientHasShielded: true,
+        transparentRecipientZatoshis: null,
+      },
+      shieldedVerification: shieldedEvidence(txid),
+    };
+    const verify = await built.app.inject({
+      method: 'POST',
+      url: `/v1/payment-requests/${code}/verify`,
+      payload: {},
+    });
+    expect(verify.json().verification.shielded.state).toBe('shielded_recipient_verified');
+    expect(verify.json().verification.shielded.recipientVerified).toBe(true);
+    expect(verify.json().verification.shielded.amountVerified).toBe(true);
+    expect(verify.json().verification.shielded.keyVerified).toBe(true);
+    expect(verify.json().request.status).toBe('CONFIRMED');
+
+    // The public projection carries the same honest level.
+    const view = (await built.app.inject({ url: `/v1/payment-requests/${code}` })).json().request;
+    expect(view.shieldedVerification.state).toBe('shielded_recipient_verified');
+    expect(view.shieldedVerification.keyVerified).toBe(true);
+  });
+
+  it('records a verified recipient but not the amount when the value did not match', async () => {
+    const { code, txid } = await createAndClaim();
+    provider.next = {
+      txid,
+      confirmations: 3,
+      broadcast: true,
+      source: 'stub',
+      evidence: {
+        txid,
+        size: 1000,
+        pools: { transparent: false, sapling: false, orchard: true, shielded: true },
+        recipientHasTransparent: false,
+        recipientHasShielded: true,
+        transparentRecipientZatoshis: null,
+      },
+      shieldedVerification: shieldedEvidence(txid, { amountVerified: false, recipientZatoshis: 100 }),
+    };
+    const verify = await built.app.inject({
+      method: 'POST',
+      url: `/v1/payment-requests/${code}/verify`,
+      payload: {},
+    });
+    expect(verify.json().verification.shielded.state).toBe('shielded_recipient_verified');
+    expect(verify.json().verification.shielded.recipientVerified).toBe(true);
+    // An underpayment is never reported as a fully verified amount.
+    expect(verify.json().verification.shielded.amountVerified).toBe(false);
+  });
+
+  it('does not upgrade when the engine reports no recipient match', async () => {
+    const { code, txid } = await createAndClaim();
+    provider.next = {
+      txid,
+      confirmations: 3,
+      broadcast: true,
+      source: 'stub',
+      evidence: {
+        txid,
+        size: 1000,
+        pools: { transparent: false, sapling: false, orchard: true, shielded: true },
+        recipientHasTransparent: false,
+        recipientHasShielded: true,
+        transparentRecipientZatoshis: null,
+      },
+      shieldedVerification: shieldedEvidence(txid, { recipientVerified: false, recipientZatoshis: 0 }),
+    };
+    const verify = await built.app.inject({
+      method: 'POST',
+      url: `/v1/payment-requests/${code}/verify`,
+      payload: {},
+    });
+    // A shielded bundle was observed, but no note to the recipient was recovered:
+    // the level must stay at plain shielded activity, never a recipient claim.
+    expect(verify.json().verification.shielded.state).toBe('shielded_activity_observed');
+    expect(verify.json().verification.shielded.recipientVerified).toBe(false);
+    expect(verify.json().verification.shielded.keyVerified).toBe(false);
+  });
+
+  it('never credits a recipient when the engine reports a txid mismatch', async () => {
+    const { code, txid } = await createAndClaim();
+    provider.next = {
+      txid,
+      confirmations: 3,
+      broadcast: true,
+      source: 'stub',
+      evidence: {
+        txid,
+        size: 1000,
+        pools: { transparent: false, sapling: false, orchard: true, shielded: true },
+        recipientHasTransparent: false,
+        recipientHasShielded: true,
+        transparentRecipientZatoshis: null,
+      },
+      // The engine decoded different bytes than the claim: it refuses to credit.
+      shieldedVerification: shieldedEvidence(txid, {
+        txidMatches: false,
+        recipientVerified: false,
+        recipientZatoshis: 0,
+        amountVerified: false,
+      }),
+    };
+    const verify = await built.app.inject({
+      method: 'POST',
+      url: `/v1/payment-requests/${code}/verify`,
+      payload: {},
+    });
+    expect(verify.json().verification.shielded.state).toBe('shielded_activity_observed');
+    expect(verify.json().verification.shielded.recipientVerified).toBe(false);
+    expect(verify.json().verification.shielded.keyVerified).toBe(false);
+  });
+
+  it('never presents a transparent settlement as a verified shielded payment', async () => {
+    const { code, txid } = await createAndClaim();
+    provider.next = {
+      txid,
+      confirmations: 6,
+      broadcast: true,
+      source: 'stub',
+      evidence: {
+        txid,
+        size: 1000,
+        pools: { transparent: true, sapling: false, orchard: false, shielded: false },
+        recipientHasTransparent: false,
+        recipientHasShielded: true,
+        transparentRecipientZatoshis: null,
+      },
+      // Even if a key were somehow present, a transaction with no shielded note
+      // recovers nothing.
+      shieldedVerification: shieldedEvidence(txid, {
+        recipientVerified: false,
+        recipientZatoshis: 0,
+        amountVerified: false,
+      }),
+    };
+    const verify = await built.app.inject({
+      method: 'POST',
+      url: `/v1/payment-requests/${code}/verify`,
+      payload: {},
+    });
+    expect(verify.json().verification.shielded.state).toBe('transparent_settlement');
+    expect(verify.json().request.status).not.toBe('CONFIRMED');
+    expect(verify.json().verification.shielded.recipientVerified).toBe(false);
+  });
+
+  it('never exposes viewing-key material in a public projection or receipt', async () => {
+    const { code, txid } = await createAndClaim();
+    // A distinctive sentinel standing in for a viewing key. The API never
+    // accepts a key from a client, so it can only reach the engine via config;
+    // this asserts no key-shaped string leaks into any public surface.
+    const sentinel = 'uivktest1SENTINELviewingkeymustneversurface';
+    provider.next = {
+      txid,
+      confirmations: 3,
+      broadcast: true,
+      source: 'stub',
+      evidence: {
+        txid,
+        size: 1000,
+        pools: { transparent: false, sapling: false, orchard: true, shielded: true },
+        recipientHasTransparent: false,
+        recipientHasShielded: true,
+        transparentRecipientZatoshis: null,
+      },
+      shieldedVerification: shieldedEvidence(txid),
+    };
+    await built.app.inject({ method: 'POST', url: `/v1/payment-requests/${code}/verify`, payload: {} });
+    const view = await built.app.inject({ url: `/v1/payment-requests/${code}` });
+    const verify = await built.app.inject({
+      method: 'POST',
+      url: `/v1/payment-requests/${code}/verify`,
+      payload: {},
+    });
+    const receipt = await built.app.inject({ url: `/v1/payment-requests/${code}/receipt` });
+    for (const res of [view, verify, receipt]) {
+      expect(res.body).not.toContain(sentinel);
+      expect(res.body).not.toMatch(/uivk|uview/);
+    }
   });
 });

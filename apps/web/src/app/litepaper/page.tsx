@@ -471,11 +471,19 @@ export default function LitepaperPage() {
                 </td>
               </tr>
               <tr>
+                <td>Shielded recipient verified</td>
+                <td>
+                  Only when the recipient has provisioned their Unified viewing key server-side:
+                  BLINK trial-decrypted a shielded note in the transaction that pays the exact
+                  requested address. The amount match is reported separately. The sender is never
+                  identified. Without a key this state never arises.
+                </td>
+              </tr>
+              <tr>
                 <td>Recipient verified</td>
                 <td>
                   The recipient exposes a transparent receiver and the transaction provably pays
-                  it. This is the only state in which the recipient and amount are independently
-                  verified. It never arises for a shielded-only recipient.
+                  it. This state never arises for a shielded-only recipient.
                 </td>
               </tr>
               <tr>
@@ -498,9 +506,11 @@ export default function LitepaperPage() {
           <div className="doc__callout">
             <p>
               The honest boundary: for a shielded recipient, BLINK can observe that a transaction
-              exists, is mined, and touches a shielded pool. It cannot prove from public data that
-              the intended recipient received the exact requested amount. BLINK says so rather than
-              presenting an observation as a guarantee.
+              exists, is mined, and touches a shielded pool. Without the recipient&apos;s viewing
+              key it cannot prove the intended recipient received the exact requested amount, and
+              says so. With the recipient&apos;s viewing key provisioned server-side, it can
+              additionally prove the exact recipient and amount by trial decryption — while still
+              never identifying the sender.
             </p>
           </div>
 

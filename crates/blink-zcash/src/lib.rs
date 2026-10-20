@@ -29,6 +29,9 @@ use zcash_protocol::{
 use zcash_transparent::address::TransparentAddress;
 use zip321::{Payment, TransactionRequest};
 
+pub mod decrypt;
+pub use decrypt::{DecryptedNote, NoteDecryption, RecipientViewingKey, ViewingKeyCapability};
+
 pub const ZATOSHIS_PER_ZEC: u64 = 100_000_000;
 pub const MAX_ZEC: u64 = 21_000_000;
 pub const MAX_MEMO_BYTES: usize = 512;
@@ -48,6 +51,7 @@ pub enum Error {
     Zip321(String),
     Payment(String),
     Transaction(String),
+    ViewingKey(String),
 }
 
 impl fmt::Display for Error {
@@ -69,6 +73,7 @@ impl fmt::Display for Error {
             Error::Zip321(e) => write!(f, "invalid ZIP 321 payment request: {e}"),
             Error::Payment(e) => write!(f, "invalid payment: {e}"),
             Error::Transaction(e) => write!(f, "invalid transaction: {e}"),
+            Error::ViewingKey(e) => write!(f, "invalid viewing key: {e}"),
         }
     }
 }
@@ -620,7 +625,7 @@ pub fn decode_transaction(data: &[u8], branch: Option<&str>) -> Result<Transacti
     })
 }
 
-fn read_transaction(data: &[u8], branch: Option<&str>) -> Result<Transaction> {
+pub(crate) fn read_transaction(data: &[u8], branch: Option<&str>) -> Result<Transaction> {
     let branch = match branch {
         Some(name) => parse_branch(name)
             .ok_or_else(|| Error::Transaction(format!("unknown branch: {name}")))?,
@@ -755,6 +760,109 @@ pub fn inspect_transaction(
         recipient_has_transparent: expected.is_some(),
         recipient_has_shielded: expected_address.map(has_shielded_receiver).unwrap_or(false),
         transparent_recipient_zatoshis: if matched_any { Some(matched) } else { None },
+    })
+}
+
+/* -------------------------------------------------------------------------- */
+/* Shielded recipient verification                                            */
+/* -------------------------------------------------------------------------- */
+
+/// The honest, cryptographically-grounded result of checking whether a
+/// transaction actually paid the intended shielded recipient.
+///
+/// Unlike [`TransactionEvidence`] (which reads only *public* bytes), this is
+/// derived from trial-decrypting the transaction with the recipient's viewing
+/// key. It is the only structure in this crate that can say "the requested
+/// recipient was paid", and it only ever says so when a note decrypted to the
+/// exact requested address.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ShieldedPaymentVerification {
+    /// The transaction id, computed from the bytes.
+    pub txid: String,
+    /// Whether the computed txid equals the expected txid, when one was supplied.
+    /// `true` when no expected txid was given. A `false` value means the bytes are
+    /// not the transaction the request is about, and no recipient match can be
+    /// credited.
+    pub txid_matches: bool,
+    /// Whether a recovered note's recipient address equals the requested one.
+    pub recipient_verified: bool,
+    /// Total zatoshis recovered to the requested recipient, across all pools.
+    /// Reported as `0` unless the decoded bytes are the expected transaction
+    /// (`txid_matches`), so it can never be read as value received against a
+    /// different transaction than the request is about.
+    pub recipient_zatoshis: u64,
+    /// Whether the recovered amount equals the requested amount.
+    pub amount_verified: bool,
+    /// The requested amount in zatoshis, when one was supplied.
+    pub expected_zatoshis: Option<u64>,
+    /// Whether the transaction carried Sapling activity.
+    pub sapling: bool,
+    /// Whether the transaction carried Orchard activity.
+    pub orchard: bool,
+    /// The pools in which a note to the requested recipient was recovered.
+    pub pools_with_recipient_notes: Vec<String>,
+    /// Whether the viewing key carried a Sapling component.
+    pub key_has_sapling: bool,
+    /// Whether the viewing key carried an Orchard component.
+    pub key_has_orchard: bool,
+}
+
+/// Determine whether `data` actually paid `expected_address`, using the
+/// recipient's viewing key.
+///
+/// `expected_zatoshis`, when supplied, is compared against the total recovered to
+/// the recipient. The comparison is deliberately exact: a short payment is not a
+/// match. (The caller decides how to treat an overpayment.)
+pub fn verify_shielded_payment(
+    data: &[u8],
+    branch: Option<&str>,
+    key: &RecipientViewingKey,
+    expected_address: &str,
+    expected_zatoshis: Option<u64>,
+    expected_txid: Option<&str>,
+) -> Result<ShieldedPaymentVerification> {
+    let decryption = decrypt::decrypt_notes(data, branch, key, expected_address, expected_txid)?;
+
+    // A recipient match only counts when the decoded transaction is the one the
+    // request is about. An unrelated mined transaction can never satisfy a claim.
+    let recipient_verified =
+        decryption.txid_matches && decryption.notes.iter().any(|n| n.recipient_match);
+    let mut pools_with_recipient_notes: Vec<String> = decryption
+        .notes
+        .iter()
+        .filter(|n| n.recipient_match)
+        .map(|n| n.pool.clone())
+        .collect();
+    pools_with_recipient_notes.sort();
+    pools_with_recipient_notes.dedup();
+
+    let amount_verified = match expected_zatoshis {
+        Some(expected) => recipient_verified && decryption.matched_zatoshis == expected,
+        None => false,
+    };
+
+    // Report recovered value only for the transaction the request is about. When
+    // the decoded bytes are not the claimed txid, no value can be attributed to
+    // this request, so the field reads 0 rather than a number that a caller might
+    // mistake for "received".
+    let recipient_zatoshis = if decryption.txid_matches {
+        decryption.matched_zatoshis
+    } else {
+        0
+    };
+
+    Ok(ShieldedPaymentVerification {
+        txid: decryption.txid,
+        txid_matches: decryption.txid_matches,
+        recipient_verified,
+        recipient_zatoshis,
+        amount_verified,
+        expected_zatoshis,
+        sapling: decryption.notes.iter().any(|n| n.pool == "sapling"),
+        orchard: decryption.notes.iter().any(|n| n.pool == "orchard"),
+        pools_with_recipient_notes,
+        key_has_sapling: decryption.key_has_sapling,
+        key_has_orchard: decryption.key_has_orchard,
     })
 }
 

@@ -72,8 +72,11 @@ BLINK protects, what it does not, and why.
   claim it.
 - **Shielded-payment proof.** For shielded recipients, sender, amount and
   recipient are private. BLINK cannot prove them from public data. Without a
-  viewing key or lightwalletd integration, BLINK can only confirm that a reported
-  transaction has been mined to the required depth.
+  recipient viewing key, BLINK can only confirm that a reported transaction has
+  been mined to the required depth. With one, it can additionally trial-decrypt
+  the transaction and establish that a shielded note pays the exact requested
+  address, and whether the recovered amount matched — reported separately, and
+  never as a claim about the sender.
 - **A malicious recipient.** A recipient could publish a request for an address
   they do not control. BLINK cannot verify address ownership; it validates
   format, kind and network only.
@@ -104,11 +107,27 @@ Providers:
   `BLINK_ZCASH_SERVICE_URL`, and reports nothing when either is missing or
   unreachable.
 
+### Key-based shielded recipient verification
+
+When `BLINK_RECIPIENT_VIEWING_KEY` is configured, the provider additionally
+trial-decrypts the observed transaction's shielded outputs with that key via the
+engine's `/v1/transaction/verify-shielded` endpoint. This is the **only** path
+that can assert a *shielded* recipient was paid. The engine attributes a note to
+the recipient only when the recovered address is byte-for-byte the requested one
+**and** the decoded bytes match the claimed txid, and reports the amount match
+separately. The resulting state is `shielded_recipient_verified`, distinct from
+the public `recipient_verified` route.
+
+The verification is fail-closed: a wrong-network key, a malformed key, bytes the
+engine cannot decode, an engine timeout, or a malformed engine response all
+report *no* shielded verification (never a fabricated match). A transaction being
+mined, or merely carrying a shielded bundle, never independently establishes
+recipient verification. Confirmation depth remains a separate requirement.
+
 ## Why BLINK does not weaken privacy for verification
 
 It would be easy to make verification simpler by asking recipients to publish
-viewing keys or to use transparent addresses. BLINK refuses both. Verification is
-designed around what a wallet/payment integration can legitimately observe, and
-where a stronger guarantee is needed the roadmap points to wallet-side
-mechanisms (viewing keys, lightwalletd note detection) rather than to a loss of
-privacy.
+viewing keys publicly or to use transparent addresses. BLINK refuses both.
+Verification is designed around what a wallet/payment integration can
+legitimately observe: an operator-provisioned, server-side, non-spending viewing
+key that is never stored or exposed, or wallet-side mechanisms.

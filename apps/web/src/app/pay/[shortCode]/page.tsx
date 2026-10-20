@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { AppFrame, Alert, Row, StatusBadge } from '@/components/Shell';
 import { BlinkPaymentCard } from '@/components/BlinkPaymentCard';
 import { PrivacyPanel } from '@/components/PrivacyPanel';
+import { VerificationBadge } from '@/components/VerificationBadge';
 import { useConnection } from '@/components/ConnectionProvider';
 import { api, ApiError, type PaymentDetails, type PublicPaymentRequest } from '@/lib/api';
 import { statusLabel, statusTone, statusIsVerified, purposeLabel } from '@/lib/status';
@@ -226,6 +227,7 @@ export default function PayPage({ params }: { params: Promise<{ shortCode: strin
               distinction: Zcash protects the payment on-chain, BLINK stores the
               request itself (memo in plaintext). */}
           <PrivacyPanel privacy={request.privacy} />
+          <VerificationBadge record={request.shieldedVerification} />
           <Link className="btn btn--ghost" href={`/receipt/${request.shortCode}`}>
             View receipt
           </Link>

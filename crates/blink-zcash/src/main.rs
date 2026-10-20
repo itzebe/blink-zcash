@@ -60,6 +60,7 @@ impl IntoResponse for ApiError {
             Error::Zip321(_) => "invalid_zip321",
             Error::Payment(_) => "invalid_payment",
             Error::Transaction(_) => "invalid_transaction",
+            Error::ViewingKey(_) => "invalid_viewing_key",
         };
         let status = match err {
             Error::InvalidNetwork(_) => StatusCode::BAD_REQUEST,
@@ -207,6 +208,69 @@ async fn parse(
     Ok(Json(serde_json::json!({ "payments": payments })))
 }
 
+#[derive(Debug, Deserialize)]
+struct VerifyShieldedRequest {
+    /// Raw transaction bytes, hex encoded. The `0x` prefix is optional.
+    data: String,
+    /// Optional consensus branch name. When omitted a version-appropriate
+    /// default is used.
+    #[serde(default)]
+    branch: Option<String>,
+    /// The recipient's Unified viewing key (`uivk…`/`uview…`). A viewing key can
+    /// only *detect* incoming notes; it cannot spend. It is used in-process and
+    /// never stored or logged by the engine.
+    viewing_key: String,
+    /// The expected recipient address. A note is only attributed to it when the
+    /// decrypted recipient is byte-for-byte this address.
+    expected_address: String,
+    /// Optional network. Used to select the parameters for the viewing key and
+    /// the note decryption. Defaults to the engine's configured network.
+    #[serde(default)]
+    network: Option<String>,
+    /// Optional requested amount, in zatoshis. When supplied, the engine reports
+    /// whether the recovered amount matches exactly.
+    #[serde(default)]
+    expected_zatoshis: Option<u64>,
+    /// Optional expected transaction id (64 hex chars). When supplied, the decoded
+    /// bytes are bound to it: a transaction whose computed txid differs can never
+    /// produce a recipient match. This is what stops a payer from pointing BLINK
+    /// at an unrelated mined transaction.
+    #[serde(default)]
+    expected_txid: Option<String>,
+}
+
+async fn verify_shielded(
+    State(state): State<AppState>,
+    Json(req): Json<VerifyShieldedRequest>,
+) -> Result<Json<blink_zcash::ShieldedPaymentVerification>, ApiError> {
+    let hex = req.data.trim().trim_start_matches("0x");
+    if hex.is_empty() || hex.len() % 2 != 0 || !hex.bytes().all(|b| b.is_ascii_hexdigit()) {
+        return Err(ApiError::from(Error::Transaction(
+            "data must be an even-length hex string".to_string(),
+        )));
+    }
+    let bytes: Vec<u8> = (0..hex.len())
+        .step_by(2)
+        .map(|i| u8::from_str_radix(&hex[i..i + 2], 16).expect("validated hex"))
+        .collect();
+
+    let network = match req.network {
+        Some(n) => BlinkNetwork::parse(&n)?,
+        None => state.network,
+    };
+
+    let key = blink_zcash::RecipientViewingKey::parse(&req.viewing_key, network)?;
+    let verification = blink_zcash::verify_shielded_payment(
+        &bytes,
+        req.branch.as_deref(),
+        &key,
+        &req.expected_address,
+        req.expected_zatoshis,
+        req.expected_txid.as_deref(),
+    )?;
+    Ok(Json(verification))
+}
+
 fn app(state: AppState) -> Router {
     Router::new()
         .route("/health", get(health))
@@ -214,6 +278,7 @@ fn app(state: AppState) -> Router {
         .route("/v1/zip321/build", post(build))
         .route("/v1/zip321/parse", post(parse))
         .route("/v1/transaction/inspect", post(inspect_transaction))
+        .route("/v1/transaction/verify-shielded", post(verify_shielded))
         .layer(TraceLayer::new_for_http())
         .with_state(state)
 }

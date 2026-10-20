@@ -36,8 +36,26 @@ data is encrypted.
 
 The **memo is plaintext**. ZIP 321 memos are plaintext on-chain, and BLINK
 stores, displays and encodes the memo in the clear. A shielded memo is encrypted
-on the Zcash blockchain by the protocol, but BLINK itself holds no viewing key
-and stores the memo unencrypted. Do not put a secret in a memo.
+on the Zcash blockchain by the protocol, but BLINK does not encrypt the memo it
+stores. Do not put a secret in a memo.
+
+## Optional recipient viewing key
+
+BLINK can cryptographically verify that a shielded transaction paid the intended
+recipient. To do so an operator may provision a **recipient's Unified viewing
+key** (`BLINK_RECIPIENT_VIEWING_KEY`, `uivk…`/`uview…`, or the `…test` forms) on
+the API. This is a *viewing* key, never a spending key: it can detect incoming
+notes but cannot move funds. It is:
+
+- server-side only — never accepted from a client, never returned by any route,
+  never placed in a payment link, ZIP 321 URI, QR code, or receipt;
+- used in-process to trial-decrypt a transaction's shielded outputs, and never
+  stored in BLINK's database;
+- passed to the engine only for the duration of one verification call.
+
+A wrong or missing key never produces a verification; the shielded settlement
+stays honestly "recipient unverified". Without a key, BLINK confirms only that a
+transaction was observed and mined to the required depth, and says so.
 
 ## What BLINK does not hide from the payer
 
