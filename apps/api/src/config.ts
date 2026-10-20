@@ -59,6 +59,25 @@ const schema = z.object({
   ZCASH_RPC_USER: z.string().optional().default(''),
   ZCASH_RPC_PASSWORD: z.string().optional().default(''),
 
+  /**
+   * The recipient's Unified *viewing* key (`uivk…`/`uview…`, or their `…test`
+   * forms), used to cryptographically verify that a transaction actually paid the
+   * requested shielded recipient — by trial-decrypting the transaction's shielded
+   * outputs. This is the only way BLINK can prove a shielded recipient was paid;
+   * without it, a shielded settlement stays "plausible but unverified".
+   *
+   * Server-side only and optional. It is a viewing key, never a spending key: it
+   * cannot move funds. It is never logged, never returned by any route and never
+   * sent to a client. Leave it unset to disable key-based verification (shielded
+   * requests then confirm on observation + depth, with an honest "recipient
+   * unverified" disclosure).
+   */
+  BLINK_RECIPIENT_VIEWING_KEY: z
+    .string()
+    .optional()
+    .default('')
+    .transform((value) => value.trim()),
+
   BLINK_CONFIRMATIONS_REQUIRED: z.coerce.number().int().min(0).default(1),
 
   /**
@@ -149,6 +168,29 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
   }
   if (parsed.BLINK_VERIFICATION_PROVIDER === 'node-rpc' && !parsed.ZCASH_RPC_URL) {
     throw new Error('BLINK_VERIFICATION_PROVIDER=node-rpc requires ZCASH_RPC_URL');
+  }
+
+  // A recipient viewing key is a network-specific key. Refuse an obvious
+  // mismatch at boot rather than let every shielded verification silently fail
+  // (the engine rejects a wrong-network key). This is a guardrail, not the
+  // security boundary: the engine still validates the key's network on every
+  // call, so a key that passes here but is wrong for the network cannot verify.
+  if (parsed.BLINK_RECIPIENT_VIEWING_KEY) {
+    const k = parsed.BLINK_RECIPIENT_VIEWING_KEY;
+    // A testnet key is `uivktest…`/`uviewtest…`, which also starts with `uivk`/
+    // `uview`, so the testnet check must come first.
+    const looksTestnet = k.startsWith('uivktest') || k.startsWith('uviewtest');
+    const looksMainnet = !looksTestnet && (k.startsWith('uivk') || k.startsWith('uview'));
+    if (parsed.ZCASH_NETWORK === 'mainnet' && !looksMainnet) {
+      throw new Error(
+        'BLINK_RECIPIENT_VIEWING_KEY does not look like a mainnet Unified viewing key (uivk…/uview…)',
+      );
+    }
+    if (parsed.ZCASH_NETWORK === 'testnet' && !looksTestnet) {
+      throw new Error(
+        'BLINK_RECIPIENT_VIEWING_KEY does not look like a testnet Unified viewing key (uivktest…/uviewtest…)',
+      );
+    }
   }
 
   // Resolve the effective price provider. When unset/blank the provider is

@@ -234,4 +234,61 @@ describe('createZcashEngine classification and ping', () => {
     expect(error).toBeInstanceOf(EngineUnavailableError);
     expect((error as EngineUnavailableError).reason).toBe('unreachable');
   });
+
+  describe('verifyShielded', () => {
+    function serving(body: unknown, status = 200) {
+      return startServer((_req, res) => {
+        res.writeHead(status, { 'content-type': 'application/json' });
+        res.end(JSON.stringify(body));
+      });
+    }
+
+    const validBody = {
+      txid: 'a'.repeat(64),
+      txid_matches: true,
+      recipient_verified: true,
+      recipient_zatoshis: 25000000,
+      amount_verified: true,
+      expected_zatoshis: 25000000,
+      sapling: false,
+      orchard: true,
+      pools_with_recipient_notes: ['orchard'],
+      key_has_sapling: false,
+      key_has_orchard: true,
+    };
+
+    const options = {
+      network: 'testnet' as const,
+      viewingKey: 'uivktest1example',
+      expectedAddress: 'utest1recipient',
+      expectedZatoshis: 25000000,
+      expectedTxid: 'a'.repeat(64),
+    };
+
+    it('parses and maps a well-formed shielded verification response', async () => {
+      const url = await serving(validBody);
+      const engine = createZcashEngine(url, 5_000, 0);
+      const result = await engine.verifyShielded('00', options);
+      expect(result.value.recipientVerified).toBe(true);
+      expect(result.value.amountVerified).toBe(true);
+      expect(result.value.txid).toBe('a'.repeat(64));
+      expect(result.value.poolsWithRecipientNotes).toEqual(['orchard']);
+    });
+
+    it('fails closed on a malformed response body (never coerces to success)', async () => {
+      const url = await serving({ txid: 'not-hex', recipient_verified: 'yes' });
+      const engine = createZcashEngine(url, 5_000, 0);
+      const error = await engine.verifyShielded('00', options).catch((e: unknown) => e);
+      expect(error).toBeInstanceOf(EngineUnavailableError);
+      expect((error as EngineUnavailableError).reason).toBe('unreachable');
+    });
+
+    it('fails closed when the txid is missing', async () => {
+      const { txid: _omit, ...withoutTxid } = validBody;
+      const url = await serving(withoutTxid);
+      const engine = createZcashEngine(url, 5_000, 0);
+      const error = await engine.verifyShielded('00', options).catch((e: unknown) => e);
+      expect(error).toBeInstanceOf(EngineUnavailableError);
+    });
+  });
 });

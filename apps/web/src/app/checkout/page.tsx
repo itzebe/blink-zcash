@@ -11,6 +11,7 @@ import { AppFrame, Alert } from '@/components/Shell';
 import { QrCode } from '@/components/QrCode';
 import { PrivacyPanel } from '@/components/PrivacyPanel';
 import { StatusPanel } from '@/components/StatusPanel';
+import { VerificationBadge } from '@/components/VerificationBadge';
 import { useConnection } from '@/components/ConnectionProvider';
 import { api, ApiError, type CreatedPaymentRequest, type PublicPaymentRequest } from '@/lib/api';
 import { purposeLabel } from '@/lib/status';
@@ -235,6 +236,10 @@ export default function CheckoutPage() {
 
             <div className="checkout__side stack stack--sm">
               <StatusPanel status={status ?? 'WAITING_FOR_PAYMENT'} confirmations={current.confirmations} />
+
+              {current.shieldedVerification ? (
+                <VerificationBadge record={current.shieldedVerification} />
+              ) : null}
 
               {confirmed ? (
                 <Link className="btn btn--primary" href={`/receipt/${created.shortCode}`}>

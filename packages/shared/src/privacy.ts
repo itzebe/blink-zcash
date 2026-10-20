@@ -121,12 +121,23 @@ export function shieldedOnlyPolicy(
  *                                    does not pay the recipient's transparent
  *                                    receiver. The shielded settlement is
  *                                    plausible; the recipient and amount remain
- *                                    unprovable from public data.
+ *                                    unprovable from public data alone.
+ *  - `shielded_recipient_verified` — the recipient's own viewing key trial-decrypted
+ *                                    a note in the transaction that pays the exact
+ *                                    requested address, and the decoded bytes
+ *                                    matched the claimed txid. This is the only
+ *                                    state in which a *shielded* recipient is
+ *                                    independently verified. `amountVerified`
+ *                                    states separately whether the recovered
+ *                                    amount equalled the requested amount. A
+ *                                    viewing key can only detect incoming notes;
+ *                                    it cannot spend, and it proves nothing about
+ *                                    the sender.
  *  - `recipient_verified`          — the recipient exposes a transparent receiver
  *                                    and the transaction provably pays it. This
  *                                    is the only state in which the requested
- *                                    recipient and amount are independently
- *                                    verified, and it only arises for a
+ *                                    recipient and amount are verified from
+ *                                    *public* bytes, and it only arises for a
  *                                    transparent-capable recipient (not the
  *                                    primary shielded-only flow).
  *  - `transparent_settlement`      — the transaction touches no shielded pool, so
@@ -140,12 +151,48 @@ export function shieldedOnlyPolicy(
 export const SHIELDED_VERIFICATION_STATES = [
   'observed',
   'shielded_activity_observed',
+  'shielded_recipient_verified',
   'recipient_verified',
   'transparent_settlement',
   'contradictory',
 ] as const;
 
 export type ShieldedVerificationState = (typeof SHIELDED_VERIFICATION_STATES)[number];
+
+const SHIELDED_VERIFICATION_STATE_SET: ReadonlySet<string> = new Set(SHIELDED_VERIFICATION_STATES);
+
+/**
+ * Whether a value read back from storage (or a provider/test seam) is a
+ * well-formed `ShieldedVerificationRecord`. Used so a public projection never
+ * casts an arbitrary stored JSON blob into a typed verification result.
+ */
+export function isShieldedVerificationRecord(
+  value: unknown,
+): value is ShieldedVerificationRecord {
+  if (!value || typeof value !== 'object') return false;
+  const v = value as Record<string, unknown>;
+  return (
+    typeof v.state === 'string' &&
+    SHIELDED_VERIFICATION_STATE_SET.has(v.state) &&
+    typeof v.txid === 'string' &&
+    typeof v.recipientVerified === 'boolean' &&
+    typeof v.amountVerified === 'boolean' &&
+    typeof v.source === 'string' &&
+    typeof v.observedAt === 'string'
+  );
+}
+
+/**
+ * Read a stored verification record, normalising a record written before the
+ * `keyVerified` field existed to `keyVerified: false`. A record can only ever be
+ * *downgraded* by this normalisation (a missing field is never treated as a
+ * verified recipient), so it can never upgrade a legacy row to a stronger claim.
+ */
+export function readShieldedVerificationRecord(value: unknown): ShieldedVerificationRecord | null {
+  if (!isShieldedVerificationRecord(value)) return null;
+  const record = value as ShieldedVerificationRecord & { keyVerified?: unknown };
+  return { ...record, keyVerified: record.keyVerified === true };
+}
 
 /** Public facts a verification provider could establish about a transaction. */
 export interface TxPoolReport {
@@ -165,6 +212,14 @@ export interface ShieldedVerificationRecord {
   /** Whether the requested recipient and amount were independently verified. */
   recipientVerified: boolean;
   amountVerified: boolean;
+  /**
+   * Whether the recipient was verified by trial-decrypting the transaction with
+   * the recipient's own viewing key (`shielded_recipient_verified`). Distinct
+   * from the public `recipient_verified` route. `true` only when a note decrypted
+   * to the exact requested address AND the decoded bytes matched the claimed
+   * txid. Never set from a client claim.
+   */
+  keyVerified: boolean;
   /** Provider that produced this evidence. */
   source: string;
   observedAt: string;

@@ -1,10 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import {
   BLINK_APP_PRIVACY_NOTE,
+  isShieldedVerificationRecord,
   privacyCapability,
   privacyHeadline,
   privacyHeadlineSentence,
   privacyLines,
+  readShieldedVerificationRecord,
   shieldedOnlyPolicy,
   withUnifiedReceivers,
 } from './privacy.js';
@@ -213,6 +215,75 @@ describe('privacyHeadlineSentence', () => {
     const s = privacyHeadlineSentence(privacyCapability('transparent')).toLowerCase();
     expect(s).toContain('visible');
     expect(s).not.toContain('anonymous');
+  });
+});
+
+describe('isShieldedVerificationRecord', () => {
+  const valid = {
+    state: 'shielded_activity_observed',
+    txid: 'a'.repeat(64),
+    pools: { transparent: false, sapling: true, orchard: false, shielded: true },
+    transparentRecipientZatoshis: null,
+    recipientVerified: false,
+    amountVerified: false,
+    source: 'lightwalletd',
+    observedAt: '2026-01-01T00:00:00.000Z',
+  };
+
+  it('accepts a well-formed shielded verification record', () => {
+    expect(isShieldedVerificationRecord(valid)).toBe(true);
+  });
+
+  it('rejects a record with an unknown state', () => {
+    expect(isShieldedVerificationRecord({ ...valid, state: 'definitely_shielded' })).toBe(false);
+  });
+
+  it('rejects a record missing required booleans', () => {
+    const { recipientVerified: _drop, ...rest } = valid;
+    expect(isShieldedVerificationRecord(rest)).toBe(false);
+  });
+
+  it('rejects non-object values (never coerces a string into a record)', () => {
+    expect(isShieldedVerificationRecord(null)).toBe(false);
+    expect(isShieldedVerificationRecord('shielded_activity_observed')).toBe(false);
+    expect(isShieldedVerificationRecord(42)).toBe(false);
+  });
+
+  it('rejects a bare object with no state', () => {
+    expect(isShieldedVerificationRecord({ txid: 'x' })).toBe(false);
+  });
+});
+
+describe('readShieldedVerificationRecord', () => {
+  const base = {
+    state: 'shielded_activity_observed',
+    txid: 'a'.repeat(64),
+    pools: { transparent: false, sapling: true, orchard: false, shielded: true },
+    transparentRecipientZatoshis: null,
+    recipientVerified: false,
+    amountVerified: false,
+    source: 'lightwalletd',
+    observedAt: '2026-01-01T00:00:00.000Z',
+  };
+
+  it('normalises a legacy record without keyVerified to keyVerified:false (never upgrades)', () => {
+    const record = readShieldedVerificationRecord(base);
+    expect(record?.keyVerified).toBe(false);
+  });
+
+  it('preserves an explicit keyVerified:true', () => {
+    const record = readShieldedVerificationRecord({
+      ...base,
+      state: 'shielded_recipient_verified',
+      keyVerified: true,
+      recipientVerified: true,
+    });
+    expect(record?.keyVerified).toBe(true);
+  });
+
+  it('drops a malformed record entirely', () => {
+    expect(readShieldedVerificationRecord({ txid: 'x' })).toBeNull();
+    expect(readShieldedVerificationRecord(null)).toBeNull();
   });
 });
 

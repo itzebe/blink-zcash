@@ -30,7 +30,7 @@ import * as grpc from '@grpc/grpc-js';
 import * as protoLoader from '@grpc/proto-loader';
 import type { ZcashNetwork } from '@blink/shared';
 
-import type { TransactionEvidence, ZcashEngine } from './zcash-engine.js';
+import type { TransactionEvidence, ZcashEngine, ShieldedPaymentVerification } from './zcash-engine.js';
 
 export interface Observation {
   /** The transaction id, exactly as returned by the provider. */
@@ -52,6 +52,14 @@ export interface Observation {
    * the provider could not establish the composition.
    */
   evidence?: TransactionEvidence;
+  /**
+   * The cryptographically-grounded shielded-recipient verification, present only
+   * when a recipient viewing key was configured and the provider trial-decrypted
+   * the transaction with it. This is the only field that can assert a *shielded*
+   * recipient was paid. Absent when no key is configured, the transaction has no
+   * shielded bundle, or the engine could not decode the bytes — never synthesized.
+   */
+  shieldedVerification?: ShieldedPaymentVerification;
 }
 
 export interface VerifyContext {
@@ -65,6 +73,11 @@ export interface VerifyContext {
    * transparent output), never a claim about a shielded recipient.
    */
   expectedAddress?: string;
+  /**
+   * The requested amount in zatoshis, when the caller wants the shielded
+   * verification to report whether the recovered amount matched exactly.
+   */
+  expectedZatoshis?: number;
 }
 
 export interface VerificationProvider {
@@ -161,6 +174,12 @@ export interface LightwalletdOptions {
    * therefore reports nothing rather than guessing.
    */
   engine?: ZcashEngine;
+  /**
+   * The recipient's Unified viewing key, when the operator has provisioned one.
+   * With it, the provider trial-decrypts the transaction and can assert that the
+   * exact requested shielded recipient was paid. Server-side only; never logged.
+   */
+  recipientViewingKey?: string;
   /** Test seam: build the gRPC client. Never used to bypass verification. */
   clientFactory?: LightwalletdClientFactory;
 }
@@ -315,6 +334,7 @@ export class LightwalletdProvider implements VerificationProvider {
   private readonly network: ZcashNetwork;
   private readonly timeoutMs: number;
   private readonly engine?: ZcashEngine;
+  private readonly recipientViewingKey?: string;
   private readonly clientFactory: LightwalletdClientFactory;
 
   constructor(private readonly options: LightwalletdOptions) {
@@ -324,6 +344,7 @@ export class LightwalletdProvider implements VerificationProvider {
     this.network = options.network ?? 'testnet';
     this.timeoutMs = options.timeoutMs ?? 10_000;
     this.engine = options.engine;
+    this.recipientViewingKey = options.recipientViewingKey?.trim() || undefined;
     this.clientFactory = options.clientFactory ?? defaultClientFactory;
   }
 
@@ -359,8 +380,45 @@ export class LightwalletdProvider implements VerificationProvider {
     }
   }
 
+  /**
+   * Trial-decrypt the returned bytes with the recipient's viewing key, when one
+   * is configured and an expected recipient is known. This is the only path that
+   * can assert a *shielded* recipient was paid. Returns `undefined` (never a
+   * synthesized result) when there is no key, no expected address, the bytes have
+   * no shielded bundle, or the engine cannot decode them. The engine itself
+   * refuses to credit a recipient unless a recovered note's address is byte-for-
+   * byte the requested one and the computed txid matches the claim.
+   */
+  private async shieldedRecipientVerification(
+    data: Buffer,
+    expectedAddress: string | undefined,
+    expectedZatoshis: number | undefined,
+    expectedTxid: string | undefined,
+  ): Promise<ShieldedPaymentVerification | undefined> {
+    if (!this.engine || !this.engine.configured) return undefined;
+    if (!this.recipientViewingKey || !expectedAddress) return undefined;
+    try {
+      const result = await this.engine.verifyShielded(data.toString('hex'), {
+        network: this.network,
+        viewingKey: this.recipientViewingKey,
+        expectedAddress,
+        ...(expectedZatoshis !== undefined ? { expectedZatoshis } : {}),
+        // Bind the decoded bytes to the observed txid at the engine level too, so
+        // a recipient match can never be credited against a different
+        // transaction than the one the provider observed.
+        ...(expectedTxid ? { expectedTxid } : {}),
+      });
+      return result.value;
+    } catch {
+      // A wrong-network key, a malformed key, or bytes the engine cannot decode:
+      // report no shielded verification rather than guessing. The public evidence
+      // path still stands on its own.
+      return undefined;
+    }
+  }
+
   async observe(context: VerifyContext): Promise<Observation | null> {
-    const { claimedTxid, network, expectedAddress } = context;
+    const { claimedTxid, network, expectedAddress, expectedZatoshis } = context;
     // Wrong network for this provider: never observe, never guess.
     if (network !== this.network) return null;
     if (!claimedTxid || !/^[0-9a-fA-F]{64}$/.test(claimedTxid)) return null;
@@ -410,6 +468,16 @@ export class LightwalletdProvider implements VerificationProvider {
         tipHeight >= minedHeight;
       const confirmations = minedOnBestChain ? tipHeight - minedHeight + 1 : 0;
 
+      // When a recipient viewing key is configured, additionally trial-decrypt
+      // the transaction to establish whether the exact requested shielded
+      // recipient was paid. Absent without a key; never synthesized.
+      const shieldedVerification = await this.shieldedRecipientVerification(
+        data,
+        expectedAddress,
+        expectedZatoshis,
+        txid,
+      );
+
       return {
         txid,
         confirmations,
@@ -426,6 +494,7 @@ export class LightwalletdProvider implements VerificationProvider {
           size: data.length,
         },
         evidence,
+        ...(shieldedVerification ? { shieldedVerification } : {}),
       };
     } catch {
       // Unreachable endpoint, timeout, gRPC error, malformed response: report
@@ -451,6 +520,7 @@ export function createVerificationProvider(config: {
   rpcPassword: string;
   network?: ZcashNetwork;
   engine?: ZcashEngine;
+  recipientViewingKey?: string;
 }): VerificationProvider {
   switch (config.provider) {
     case 'node-rpc':
@@ -466,6 +536,7 @@ export function createVerificationProvider(config: {
         url: config.lightwalletdUrl,
         network: config.network ?? 'testnet',
         ...(config.engine ? { engine: config.engine } : {}),
+        ...(config.recipientViewingKey ? { recipientViewingKey: config.recipientViewingKey } : {}),
       });
     case 'none':
     default:

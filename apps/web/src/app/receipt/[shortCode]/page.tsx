@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { privacyHeadline } from '@blink/shared';
 import { AppFrame, Alert, Row, NetworkPill } from '@/components/Shell';
 import { PrivacyPanel } from '@/components/PrivacyPanel';
+import { VerificationBadge } from '@/components/VerificationBadge';
 import { useConnection } from '@/components/ConnectionProvider';
 import { api, ApiError, type Receipt } from '@/lib/api';
 import { purposeLabel } from '@/lib/status';
@@ -130,6 +131,8 @@ export default function ReceiptPage({ params }: { params: Promise<{ shortCode: s
             </div>
 
             {receipt.privacy ? <PrivacyPanel privacy={receipt.privacy} /> : null}
+
+            <VerificationBadge record={receipt.shieldedVerification} />
 
             <Alert kind="info">{receipt.statement}</Alert>
 

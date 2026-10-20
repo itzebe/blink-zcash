@@ -19,8 +19,10 @@ import {
 } from '../services/verification-provider.js';
 import type {
   InspectTransactionOptions,
+  ShieldedPaymentVerification,
   TransactionEvidence,
   TransactionInfo,
+  VerifyShieldedOptions,
   ZcashEngine,
 } from '../services/zcash-engine.js';
 
@@ -29,6 +31,7 @@ const CLAIMED_TXID = 'a'.repeat(64);
 interface Calls {
   getTransactionHash?: Buffer;
   closed: boolean;
+  verifyShieldedCalls?: number;
 }
 
 function fakeEngine(overrides: Partial<{
@@ -36,10 +39,14 @@ function fakeEngine(overrides: Partial<{
   txid: string | null;
   throwing: boolean;
   evidence: TransactionEvidence | null;
+  shieldedVerification: ShieldedPaymentVerification | null;
+  verifyShieldedThrows: boolean;
 }> = {}): ZcashEngine {
   const configured = overrides.configured ?? true;
   const txid = overrides.txid === undefined ? CLAIMED_TXID : overrides.txid;
   const throwing = overrides.throwing ?? false;
+  const shieldedVerification =
+    overrides.shieldedVerification === undefined ? null : overrides.shieldedVerification;
   const evidence =
     overrides.evidence === undefined
       ? {
@@ -53,6 +60,9 @@ function fakeEngine(overrides: Partial<{
       : overrides.evidence;
   return {
     configured,
+    async ping() {
+      return configured;
+    },
     async inspectAddress() {
       throw new Error('not used');
     },
@@ -69,6 +79,11 @@ function fakeEngine(overrides: Partial<{
       if (throwing) throw new Error('decode failed');
       if (evidence === null) throw new Error('decode failed');
       return { value: { ...evidence, txid }, authoritative: true };
+    },
+    async verifyShielded(_data: string, _options: VerifyShieldedOptions) {
+      if (overrides.verifyShieldedThrows) throw new Error('engine unavailable');
+      if (shieldedVerification === null) throw new Error('no shielded verification');
+      return { value: shieldedVerification, authoritative: true };
     },
   };
 }
@@ -130,12 +145,14 @@ function providerWith(config: {
   failWith?: Error;
   calls: Calls;
   network?: 'testnet' | 'mainnet';
+  recipientViewingKey?: string;
 }): LightwalletdProvider {
   return new LightwalletdProvider({
     url: 'http://localhost:9067',
     network: config.network ?? 'testnet',
     engine: config.engine ?? fakeEngine(),
     clientFactory: fakeClientFactory(config),
+    ...(config.recipientViewingKey ? { recipientViewingKey: config.recipientViewingKey } : {}),
   });
 }
 
@@ -352,5 +369,99 @@ describe('LightwalletdProvider', () => {
     });
     expect(obs).not.toBeNull();
     expect(seenExpected).toBe('t1RecipientXyz');
+  });
+
+  const verifiedShielded = (overrides: Partial<ShieldedPaymentVerification> = {}): ShieldedPaymentVerification => ({
+    txid: CLAIMED_TXID,
+    txidMatches: true,
+    recipientVerified: true,
+    recipientZatoshis: 25000000,
+    amountVerified: true,
+    expectedZatoshis: 25000000,
+    sapling: false,
+    orchard: true,
+    poolsWithRecipientNotes: ['orchard'],
+    keyHasSapling: false,
+    keyHasOrchard: true,
+    ...overrides,
+  });
+
+  it('attaches shielded verification only when a viewing key is configured', async () => {
+    const calls: Calls = { closed: false };
+    const provider = providerWith({
+      calls,
+      data: bytes,
+      minedHeight: 990,
+      tipHeight: 1000,
+      recipientViewingKey: 'uivktest1example',
+      engine: fakeEngine({ shieldedVerification: verifiedShielded() }),
+    });
+    const obs = await provider.observe({
+      claimedTxid: CLAIMED_TXID,
+      network: 'testnet',
+      expectedAddress: 'utest1recipient',
+      expectedZatoshis: 25000000,
+    });
+    expect(obs).not.toBeNull();
+    expect(obs!.shieldedVerification?.recipientVerified).toBe(true);
+    expect(obs!.shieldedVerification?.amountVerified).toBe(true);
+  });
+
+  it('omits shielded verification when no viewing key is configured', async () => {
+    const calls: Calls = { closed: false };
+    const provider = providerWith({
+      calls,
+      data: bytes,
+      minedHeight: 990,
+      tipHeight: 1000,
+      // No recipientViewingKey.
+      engine: fakeEngine({ shieldedVerification: verifiedShielded() }),
+    });
+    const obs = await provider.observe({
+      claimedTxid: CLAIMED_TXID,
+      network: 'testnet',
+      expectedAddress: 'utest1recipient',
+      expectedZatoshis: 25000000,
+    });
+    expect(obs).not.toBeNull();
+    // Without a key the provider must never assert a shielded recipient.
+    expect(obs!.shieldedVerification).toBeUndefined();
+  });
+
+  it('omits shielded verification when the engine fails (fail closed)', async () => {
+    const calls: Calls = { closed: false };
+    const provider = providerWith({
+      calls,
+      data: bytes,
+      minedHeight: 990,
+      tipHeight: 1000,
+      recipientViewingKey: 'uivktest1example',
+      engine: fakeEngine({ verifyShieldedThrows: true }),
+    });
+    const obs = await provider.observe({
+      claimedTxid: CLAIMED_TXID,
+      network: 'testnet',
+      expectedAddress: 'utest1recipient',
+      expectedZatoshis: 25000000,
+    });
+    // The observation still stands, but the shielded claim is dropped, never
+    // fabricated.
+    expect(obs).not.toBeNull();
+    expect(obs!.shieldedVerification).toBeUndefined();
+  });
+
+  it('does not attach shielded verification without an expected recipient', async () => {
+    const calls: Calls = { closed: false };
+    const provider = providerWith({
+      calls,
+      data: bytes,
+      minedHeight: 990,
+      tipHeight: 1000,
+      recipientViewingKey: 'uivktest1example',
+      engine: fakeEngine({ shieldedVerification: verifiedShielded() }),
+    });
+    const obs = await provider.observe({ claimedTxid: CLAIMED_TXID, network: 'testnet' });
+    expect(obs).not.toBeNull();
+    expect(obs!.shieldedVerification).toBeUndefined();
   });
 });

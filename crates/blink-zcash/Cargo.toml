@@ -29,6 +29,13 @@ zcash_protocol = "0.11.0-pre.0"
 # Transparent address decoding (P2PKH/P2SH) used to match a transparent output
 # against a requested recipient. Same pre-release line as the crates above.
 zcash_transparent = "0.11.0-pre.0"
+# Shielded note discovery. `sapling-crypto` and `orchard` provide the canonical
+# note-decryption primitives; `zcash_note_encryption` provides the trial
+# decryption driver. `zcash_keys` parses the recipient's Unified viewing key.
+# These must resolve to the same versions the pinned `zcash_primitives` uses.
+sapling-crypto = "0.9.0"
+orchard = "0.16.0"
+zcash_note_encryption = "0.5.1"
 
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
@@ -37,5 +44,19 @@ tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "signal
 tower-http = { version = "0.5", features = ["trace", "cors"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+zcash_keys = "=0.17.0-pre.0"
 
 [dev-dependencies]
+# Test-only: build synthetic shielded transactions in-process to exercise the
+# production trial-decryption path. `test-dependencies` enables the mock provers
+# and test key constructors; these are never linked into the server binary.
+sapling-crypto = { version = "0.9.0", features = ["test-dependencies"] }
+orchard = { version = "0.16.0", features = ["test-dependencies"] }
+zcash_primitives = { version = "0.31.0-pre.0", features = ["test-dependencies"] }
+zcash_address = "0.14.0-pre.0"
+zcash_protocol = "0.11.0-pre.0"
+zcash_keys = { version = "=0.17.0-pre.0", features = ["test-dependencies"] }
+rand = { version = "0.10", features = ["std_rng", "sys_rng"] }
+subtle = "2"
+nonempty = "0.11"
+zcash_note_encryption = "0.5.1"

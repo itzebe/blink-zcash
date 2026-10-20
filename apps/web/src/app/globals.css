@@ -1808,6 +1808,66 @@ details.tech .tech__body div + div {
   background: var(--danger-bg);
 }
 
+.verification {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface-2);
+  padding: 12px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.verification__head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.verification__kicker {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.verification__label {
+  font-size: 13px;
+  font-weight: 600;
+  padding: 3px 10px;
+  border-radius: var(--radius-pill);
+  border: 1px solid var(--border-strong);
+  background: var(--surface-3);
+  color: var(--text);
+}
+
+.verification__label--ok {
+  color: var(--success);
+  border-color: rgba(21, 128, 61, 0.35);
+  background: var(--success-bg);
+}
+
+.verification__label--progress {
+  color: var(--warn);
+  border-color: rgba(180, 83, 9, 0.35);
+  background: var(--warn-bg);
+}
+
+.verification__label--bad {
+  color: var(--danger);
+  border-color: rgba(185, 28, 28, 0.35);
+  background: var(--danger-bg);
+}
+
+.verification__detail {
+  margin: 0;
+  color: var(--text);
+  font-size: 13.5px;
+  line-height: 1.5;
+}
+
 .checkout__grid {
   display: grid;
   grid-template-columns: minmax(0, 1.1fr) minmax(0, 0.9fr);

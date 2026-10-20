@@ -7,7 +7,7 @@
  * reports what a verification provider actually observed.
  */
 
-import type { PrivacyCapability, PaymentPurpose } from '@blink/shared';
+import type { PrivacyCapability, PaymentPurpose, ShieldedVerificationRecord } from '@blink/shared';
 
 export interface PublicPaymentRequest {
   shortCode: string;
@@ -31,6 +31,8 @@ export interface PublicPaymentRequest {
   txidShort: string | null;
   /** Protocol-accurate privacy capability of the route (from the address kind). */
   privacy: PrivacyCapability;
+  /** Verification level the backend established, or null before any observation. */
+  shieldedVerification: ShieldedVerificationRecord | null;
   expiresAt: string;
   createdAt: string;
 }
@@ -204,4 +206,6 @@ export interface Receipt {
   confirmations: number;
   paidAt: string;
   statement: string;
+  /** The verification level the backend actually established. */
+  shieldedVerification: ShieldedVerificationRecord | null;
 }

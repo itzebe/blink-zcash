@@ -90,3 +90,30 @@ payer-side address confidentiality and must not claim it.
   payment on-chain.
 - States the payer-facing limit in the interface itself, in the litepaper, and in
   the security model, so the product never implies more privacy than it provides.
+
+## What viewing-key verification establishes — and what it does not
+
+A recipient can optionally let BLINK verify receipt by provisioning their Unified
+**viewing** key server-side (`BLINK_RECIPIENT_VIEWING_KEY`). BLINK then
+trial-decrypts an observed transaction's shielded outputs with that key (in the
+Rust engine, via `verify_shielded_payment`) and reports:
+
+| Established | Not established |
+| --- | --- |
+| A shielded note in the transaction pays the **exact requested address** (byte-for-byte). | **The sender.** A viewing key cannot identify who paid. |
+| The recovered value, and whether it equals the requested amount (stated separately). | Any value in other pools or change outputs the recipient does not own. |
+| That the decoded bytes match the claimed txid (an unrelated transaction is never credited). | The recipient's spending key — a viewing key cannot spend, and BLINK never asks for one. |
+
+Pool coverage: **Orchard and Sapling** are both trial-decrypted, independently,
+and the per-pool result is reported separately (`pools_with_recipient_notes`), so
+an Orchard match is never mistaken for a Sapling match. Both pools are covered by
+permanent regression tests (`crates/blink-zcash/tests/shielded_verification.rs`).
+
+Limits that remain:
+
+- The standard ZIP 321 handoff still exposes the recipient address to the payer's
+  wallet; viewing-key verification does not change that.
+- The key is the recipient's capability, not a proof of the sender. The receipt
+  and UI state this explicitly.
+- Without a key, a shielded settlement stays `shielded_activity_observed`:
+  observed and mined, but recipient and amount unverified.

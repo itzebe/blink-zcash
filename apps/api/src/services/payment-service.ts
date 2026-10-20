@@ -17,6 +17,7 @@ import {
   normaliseUsdAmount,
   parseZecToZatoshis,
   privacyCapability,
+  readShieldedVerificationRecord,
   shieldedOnlyPolicy,
   withUnifiedReceivers,
   type Currency,
@@ -565,6 +566,11 @@ export class PaymentService {
       confirmations: row.confirmations,
       txidShort: row.txid ? `${row.txid.slice(0, 8)}…${row.txid.slice(-6)}` : null,
       privacy: this.privacyOf(row),
+      // The honest verification level, when the verification layer has observed
+      // something. Never the raw address, URI or memo. A malformed/legacy stored
+      // value is dropped rather than surfaced, and a legacy record is normalised
+      // so a missing `keyVerified` can never be read as a verified recipient.
+      shieldedVerification: readShieldedVerificationRecord(row.shieldedVerification),
       expiresAt: row.expiresAt.toISOString(),
       createdAt: row.createdAt.toISOString(),
     };
@@ -714,10 +720,24 @@ export class PaymentService {
       expectedAddress = undefined;
     }
 
+    // The requested amount in zatoshis, so a key-based shielded verification can
+    // report whether the recovered amount matched exactly. Derived from the
+    // stored ZEC amount; a malformed or out-of-safe-range value simply omits the
+    // amount check (the engine still verifies the recipient).
+    let expectedZatoshis: number | undefined;
+    try {
+      const zat = parseZecToZatoshis(current.amount);
+      expectedZatoshis =
+        zat <= BigInt(Number.MAX_SAFE_INTEGER) ? Number(zat) : undefined;
+    } catch {
+      expectedZatoshis = undefined;
+    }
+
     const observation = await this.opts.provider.observe({
       claimedTxid: current.claimedTxid ?? undefined,
       network: current.network as ZcashNetwork,
       ...(expectedAddress ? { expectedAddress } : {}),
+      ...(expectedZatoshis !== undefined ? { expectedZatoshis } : {}),
     });
 
     if (!observation) {
@@ -843,10 +863,16 @@ export class PaymentService {
 
   /**
    * Classify what a provider's observation actually establishes about a shielded
-   * payment, from the public facts only.
+   * payment.
    *
    * The ordering is deliberate and the distinctions are explicit:
    *
+   *  0. If a configured recipient viewing key trial-decrypted a note in the
+   *     transaction that pays the exact requested address (and the decoded bytes
+   *     matched the claim), that is `shielded_recipient_verified` — the only
+   *     state in which a *shielded* recipient is independently verified. The
+   *     recipient's own key is the sole authority here; it proves nothing about
+   *     the sender.
    *  1. If the transaction provably pays the requested recipient's transparent
    *     receiver, that is a `contradictory` settlement for a shielded request —
    *     the payment is public. (If the recipient is transparent-capable, this is
@@ -858,8 +884,8 @@ export class PaymentService {
    *     The recipient and amount remain unprovable from public data.
    *  4. Otherwise the composition is unknown: report plain `observed`.
    *
-   * It never claims a shielded recipient or amount was paid: shielded transfers
-   * do not expose them.
+   * It never claims a shielded recipient or amount was paid unless a viewing key
+   * recovered a note to the exact requested address.
    */
   private classifyShieldedVerification(
     row: typeof paymentRequests.$inferSelect,
@@ -879,11 +905,20 @@ export class PaymentService {
         }
       : null;
 
+    // Key-based shielded verification takes precedence: it is the only evidence
+    // that a specific shielded recipient was paid. It is accepted only when the
+    // engine actually recovered a note to the exact requested address and the
+    // decoded bytes matched the claim (`txidMatches`).
+    const key = observation.shieldedVerification;
+    const keyVerified = Boolean(key && key.txidMatches && key.recipientVerified);
+
     // The only state in which a third party can independently verify recipient
-    // and amount: the recipient exposes a transparent receiver and the
-    // transaction pays it.
+    // and amount from public bytes: the recipient exposes a transparent receiver
+    // and the transaction pays it.
     let state: ShieldedVerificationState;
-    if (transparentPaid) {
+    if (keyVerified) {
+      state = 'shielded_recipient_verified';
+    } else if (transparentPaid) {
       state = recipientKind === 'transparent' ? 'recipient_verified' : 'contradictory';
     } else if (pools && !pools.shielded) {
       state = 'transparent_settlement';
@@ -898,8 +933,9 @@ export class PaymentService {
       txid: observation.txid,
       pools,
       transparentRecipientZatoshis: evidence?.transparentRecipientZatoshis ?? null,
-      recipientVerified: state === 'recipient_verified',
-      amountVerified: state === 'recipient_verified',
+      recipientVerified: keyVerified || state === 'recipient_verified',
+      amountVerified: keyVerified ? Boolean(key?.amountVerified) : state === 'recipient_verified',
+      keyVerified,
       source: observation.source,
       observedAt,
     };
