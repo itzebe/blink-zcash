@@ -14,6 +14,12 @@ interface ConnectionContextValue {
   network: ZcashNetwork | null;
   /** True once the API has confirmed the network and the app may take payments. */
   ready: boolean;
+  /**
+   * Presence-only: whether the API has a recipient viewing key configured, so a
+   * shielded settlement can be attributed to the recipient. `null` until the API
+   * has answered, and `null` (never `false`) when the API does not report it.
+   */
+  recipientViewingKeyConfigured: boolean | null;
   retryNow: () => void;
 }
 
@@ -57,6 +63,8 @@ export function ConnectionProvider({ children }: { children: React.ReactNode }) 
       state,
       network: state.kind === 'ready' ? state.network : null,
       ready: state.kind === 'ready',
+      recipientViewingKeyConfigured:
+        state.kind === 'ready' ? state.recipientViewingKeyConfigured : null,
       retryNow: () => monitor.retryNow(),
     };
   }, [monitor, state]);

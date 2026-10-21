@@ -86,6 +86,15 @@ export const PAYMENT_STATUSES = [
   'TRANSACTION_CREATED',
   'BROADCAST',
   'CONFIRMING',
+  // The transaction reached the required confirmation depth, but for a shielded
+  // request that alone does not establish that the intended recipient or amount
+  // was paid. It is deliberately NOT a terminal "paid" state and must never be
+  // used to unlock a receipt.
+  'OBSERVED',
+  // The settlement evidence actually establishes the request: either a
+  // recipient viewing key trial-decrypted a shielded note to the exact requested
+  // address, or (for a transparent-capable route) the transaction provably pays
+  // the requested recipient. This is the only state a receipt is issued for.
   'CONFIRMED',
   'FAILED',
   'EXPIRED',
@@ -110,6 +119,17 @@ export function isTerminalStatus(status: PaymentStatus): boolean {
 }
 
 /**
+ * The only state in which BLINK has established that the request was settled by
+ * the intended recipient. Everything else — including a mined transaction at full
+ * confirmation depth (`OBSERVED`) — is a weaker, non-settlement state.
+ */
+export const SETTLEMENT_STATUS: PaymentStatus = 'CONFIRMED';
+
+export function isSettledStatus(status: PaymentStatus): boolean {
+  return status === SETTLEMENT_STATUS;
+}
+
+/**
  * Allowed forward transitions of the payment-request state machine. The API
  * layer enforces this so that neither a client nor a bug can move a request
  * backwards (e.g. from CONFIRMED back to WAITING_FOR_PAYMENT).
@@ -127,6 +147,7 @@ const TRANSITIONS: Record<PaymentStatus, readonly PaymentStatus[]> = {
     'TRANSACTION_CREATED',
     'BROADCAST',
     'CONFIRMING',
+    'OBSERVED',
     'CONFIRMED',
     'EXPIRED',
     'CANCELLED',
@@ -138,6 +159,7 @@ const TRANSITIONS: Record<PaymentStatus, readonly PaymentStatus[]> = {
     'TRANSACTION_CREATED',
     'BROADCAST',
     'CONFIRMING',
+    'OBSERVED',
     'CONFIRMED',
     'EXPIRED',
     'CANCELLED',
@@ -148,19 +170,24 @@ const TRANSITIONS: Record<PaymentStatus, readonly PaymentStatus[]> = {
     'TRANSACTION_CREATED',
     'BROADCAST',
     'CONFIRMING',
+    'OBSERVED',
     'CONFIRMED',
     'EXPIRED',
     'FAILED',
     'UNKNOWN',
   ],
-  TRANSACTION_CREATED: ['BROADCAST', 'CONFIRMING', 'CONFIRMED', 'FAILED', 'UNKNOWN'],
-  BROADCAST: ['CONFIRMING', 'CONFIRMED', 'FAILED', 'UNKNOWN'],
-  CONFIRMING: ['CONFIRMED', 'FAILED', 'UNKNOWN'],
+  TRANSACTION_CREATED: ['BROADCAST', 'CONFIRMING', 'OBSERVED', 'CONFIRMED', 'FAILED', 'UNKNOWN'],
+  BROADCAST: ['CONFIRMING', 'OBSERVED', 'CONFIRMED', 'FAILED', 'UNKNOWN'],
+  CONFIRMING: ['OBSERVED', 'CONFIRMED', 'FAILED', 'UNKNOWN'],
+  // A mined transaction whose settlement evidence is incomplete. It may still be
+  // upgraded to CONFIRMED once the evidence (a viewing key, or a public
+  // transparent match) establishes the recipient and amount, or contradicted.
+  OBSERVED: ['CONFIRMED', 'FAILED', 'UNKNOWN'],
   CONFIRMED: [],
   FAILED: [],
   EXPIRED: [],
   CANCELLED: [],
-  UNKNOWN: ['CONFIRMING', 'BROADCAST', 'CONFIRMED', 'FAILED'],
+  UNKNOWN: ['CONFIRMING', 'BROADCAST', 'OBSERVED', 'CONFIRMED', 'FAILED'],
 };
 
 export function canTransition(from: PaymentStatus, to: PaymentStatus): boolean {

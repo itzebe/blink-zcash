@@ -8,7 +8,7 @@ import { PrivacyPanel } from '@/components/PrivacyPanel';
 import { VerificationBadge } from '@/components/VerificationBadge';
 import { useConnection } from '@/components/ConnectionProvider';
 import { api, ApiError, type PaymentDetails, type PublicPaymentRequest } from '@/lib/api';
-import { statusLabel, statusTone, statusIsVerified, purposeLabel } from '@/lib/status';
+import { statusLabel, statusTone, statusIsSettled, statusIsVerified, purposeLabel } from '@/lib/status';
 
 type Phase =
   | { name: 'loading' }
@@ -21,7 +21,7 @@ type Phase =
   | { name: 'paid' };
 
 export default function PayPage({ params }: { params: Promise<{ shortCode: string }> }) {
-  const { ready } = useConnection();
+  const { ready, recipientViewingKeyConfigured } = useConnection();
   const [shortCode, setShortCode] = useState<string | null>(null);
   const [request, setRequest] = useState<PublicPaymentRequest | null>(null);
   const [details, setDetails] = useState<PaymentDetails | null>(null);
@@ -44,6 +44,7 @@ export default function PayPage({ params }: { params: Promise<{ shortCode: strin
       setRequest(req);
       if (det) setDetails(det);
       if (req.status === 'CONFIRMED') setPhase({ name: 'paid' });
+      else if (req.status === 'OBSERVED') setPhase({ name: 'done' });
       else if (req.status === 'EXPIRED')
         setPhase({ name: 'error', message: 'This payment request has expired.', code: 'expired' });
       else if (req.status === 'CANCELLED')
@@ -82,7 +83,7 @@ export default function PayPage({ params }: { params: Promise<{ shortCode: strin
   // the API, which asks the verification provider.
   useEffect(() => {
     if (!shortCode) return;
-    const active = ['BROADCAST', 'CONFIRMING', 'TRANSACTION_CREATED'];
+    const active = ['BROADCAST', 'CONFIRMING', 'TRANSACTION_CREATED', 'OBSERVED'];
     if (!request || !active.includes(request.status)) {
       if (pollRef.current) clearInterval(pollRef.current);
       return;
@@ -94,6 +95,10 @@ export default function PayPage({ params }: { params: Promise<{ shortCode: strin
         if (req.status === 'CONFIRMED') {
           setPhase({ name: 'paid' });
           if (pollRef.current) clearInterval(pollRef.current);
+        } else if (req.status === 'OBSERVED') {
+          // Observed but not settled: keep polling, since settlement evidence
+          // (a viewing key, or a transparent match) may still arrive.
+          setPhase({ name: 'done' });
         }
       } catch {
         /* transient; keep polling */
@@ -227,7 +232,10 @@ export default function PayPage({ params }: { params: Promise<{ shortCode: strin
               distinction: Zcash protects the payment on-chain, BLINK stores the
               request itself (memo in plaintext). */}
           <PrivacyPanel privacy={request.privacy} />
-          <VerificationBadge record={request.shieldedVerification} />
+          <VerificationBadge
+            record={request.shieldedVerification}
+            options={{ status: request.status, keyConfigured: recipientViewingKeyConfigured }}
+          />
           <Link className="btn btn--ghost" href={`/receipt/${request.shortCode}`}>
             View receipt
           </Link>
@@ -237,17 +245,20 @@ export default function PayPage({ params }: { params: Promise<{ shortCode: strin
   }
 
   if (phase.name === 'done') {
-    const verified = statusIsVerified(request.status);
+    const settled = statusIsSettled(request.status);
+    const observed = statusIsVerified(request.status);
     return (
       <AppFrame>
         <div className="stack">
           <div className="stack stack--sm">
             <p className="kicker">Transaction recorded</p>
-            <h1>{verified ? 'Payment observed' : 'Waiting for confirmation'}</h1>
+            <h1>{settled ? 'Payment complete' : observed ? 'Payment observed' : 'Waiting for confirmation'}</h1>
             <p className="lede">
-              {verified
-                ? 'BLINK observed your transaction on the Zcash network.'
-                : 'BLINK recorded the transaction id you provided. It has not yet observed it on the network, so this is not confirmation.'}
+              {settled
+                ? 'BLINK established that this request was settled by the intended recipient.'
+                : observed
+                  ? 'BLINK observed your transaction on the Zcash network. It has not yet established that the intended recipient and amount were paid, so this is not a verified settlement.'
+                  : 'BLINK recorded the transaction id you provided. It has not yet observed it on the network, so this is not confirmation.'}
             </p>
           </div>
           <div className="card">

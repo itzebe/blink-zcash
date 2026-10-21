@@ -8,10 +8,10 @@ import { PrivacyPanel } from '@/components/PrivacyPanel';
 import { VerificationBadge } from '@/components/VerificationBadge';
 import { useConnection } from '@/components/ConnectionProvider';
 import { api, ApiError, type Receipt } from '@/lib/api';
-import { purposeLabel } from '@/lib/status';
+import { purposeLabel, statusLabel } from '@/lib/status';
 
 export default function ReceiptPage({ params }: { params: Promise<{ shortCode: string }> }) {
-  const { ready } = useConnection();
+  const { ready, recipientViewingKeyConfigured } = useConnection();
   const [shortCode, setShortCode] = useState<string | null>(null);
   const [receipt, setReceipt] = useState<Receipt | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -73,7 +73,7 @@ export default function ReceiptPage({ params }: { params: Promise<{ shortCode: s
                 ✓
               </div>
               <p className="kicker">Receipt · {purposeLabel(receipt.purpose)}</p>
-              <h1>Payment complete</h1>
+              <h1>Payment confirmed</h1>
             </>
           ) : (
             <>
@@ -114,7 +114,7 @@ export default function ReceiptPage({ params }: { params: Promise<{ shortCode: s
                     1 ZEC = ${receipt.zecUsdPrice} USD
                   </Row>
                 ) : null}
-                <Row label="Status">Confirmed</Row>
+                <Row label="Status">{statusLabel(receipt.status)}</Row>
                 <Row label="Network">
                   {receipt.network === 'mainnet' ? 'Zcash mainnet' : 'Zcash testnet'}
                 </Row>
@@ -132,7 +132,10 @@ export default function ReceiptPage({ params }: { params: Promise<{ shortCode: s
 
             {receipt.privacy ? <PrivacyPanel privacy={receipt.privacy} /> : null}
 
-            <VerificationBadge record={receipt.shieldedVerification} />
+            <VerificationBadge
+              record={receipt.shieldedVerification}
+              options={{ status: receipt.status, keyConfigured: recipientViewingKeyConfigured }}
+            />
 
             <Alert kind="info">{receipt.statement}</Alert>
 

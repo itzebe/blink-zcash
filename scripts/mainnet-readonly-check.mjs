@@ -183,11 +183,20 @@ try {
   record('unknown txid is not observed', unknown === null, `${unknown}`);
 
   if (lastTxid) {
+    // Mutate the first hex nibble to a value it definitely is not, so the
+    // "mismatched txid" control is genuinely a different 64-hex txid (a naive
+    // `replace(/^../, 'ff')` is a no-op when the txid already starts with `ff`).
+    const first = lastTxid[0].toLowerCase();
+    const mutated = (first === '0' ? '1' : '0') + lastTxid.slice(1);
     const mismatched = await provider.observe({
-      claimedTxid: lastTxid.replace(/^../, 'ff'),
+      claimedTxid: mutated,
       network: 'mainnet',
     });
-    record('mismatched txid is not observed', mismatched === null, `${mismatched}`);
+    record(
+      'mismatched txid is not observed',
+      mismatched === null,
+      `${mutated} -> ${mismatched}`,
+    );
   }
 
   const wrongNet = await provider.observe({
