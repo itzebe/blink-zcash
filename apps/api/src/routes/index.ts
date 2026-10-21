@@ -13,7 +13,12 @@
  */
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
-import { ALLOWED_EXPIRY_MINUTES, readShieldedVerificationRecord, type ShieldedVerificationRecord } from '@blink/shared';
+import {
+  ALLOWED_EXPIRY_MINUTES,
+  isSettlementEvidence,
+  readShieldedVerificationRecord,
+  type ShieldedVerificationRecord,
+} from '@blink/shared';
 import { PaymentRequestError } from '../services/payment-service.js';
 import type { ZecUsdPriceProvider } from '../services/price-service.js';
 
@@ -318,13 +323,19 @@ export async function registerRoutes(app: FastifyInstance, deps: RouteDeps): Pro
       return reply.code(404).send({ error: 'not_found', message: 'payment request not found' });
     await service.effectiveStatus(row);
     const fresh = (await service.findByShortCode(shortCode))!;
-    if (fresh.status !== 'CONFIRMED') {
+    const shielded = readShieldedVerificationRecord(fresh.shieldedVerification);
+    // The receipt gate. A receipt is proof of payment to a merchant, so it is
+    // issued only when BOTH hold: the request is CONFIRMED, AND the stored
+    // verification record is settlement evidence naming the intended recipient
+    // and amount. A `null` record — no evidence, a legacy row written before this
+    // field existed, or a malformed blob — is not sufficient, so a stale
+    // `status = 'CONFIRMED'` row cannot be laundered into a receipt.
+    if (fresh.status !== 'CONFIRMED' || !isSettlementEvidence(shielded)) {
       return reply.code(409).send({
         error: 'not_confirmed',
         message: 'a receipt is only issued for a confirmed payment',
       });
     }
-    const shielded = readShieldedVerificationRecord(fresh.shieldedVerification);
     return reply.send({
       receipt: {
         shortCode: fresh.shortCode,
@@ -354,10 +365,15 @@ export async function registerRoutes(app: FastifyInstance, deps: RouteDeps): Pro
    * Authoritative network identity. The web app compares this against its own
    * build-time NEXT_PUBLIC_NETWORK and fails closed on any disagreement, so a
    * frontend can never silently transact on a different network than the API.
+   *
+   * `recipientViewingKeyConfigured` is presence-only: it tells the client whether
+   * recipient/amount verification of a shielded settlement is possible at all.
+   * The key value itself is never returned.
    */
   app.get('/v1/meta/network', async () => ({
     network: config.ZCASH_NETWORK,
     verificationProvider: config.BLINK_VERIFICATION_PROVIDER,
     priceProvider: config.BLINK_PRICE_PROVIDER,
+    recipientViewingKeyConfigured: config.BLINK_RECIPIENT_VIEWING_KEY.length > 0,
   }));
 }

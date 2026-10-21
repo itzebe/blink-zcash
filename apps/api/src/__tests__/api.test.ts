@@ -143,6 +143,42 @@ async function create(overrides: Record<string, unknown> = {}) {
   return { status: res.statusCode, body: res.json() };
 }
 
+/**
+ * A stub observation in which a recipient viewing key trial-decrypted a shielded
+ * note to the exact requested recipient and amount. This is the only evidence
+ * that settles a shielded request (`shielded_recipient_verified`), so tests that
+ * assert CONFIRMED must supply it.
+ */
+function settledObservation(txid: string, confirmations = 3, amountZatoshis = 25000000) {
+  return {
+    txid,
+    confirmations,
+    broadcast: true,
+    source: 'stub',
+    evidence: {
+      txid,
+      size: 1000,
+      pools: { transparent: false, sapling: true, orchard: false, shielded: true },
+      recipientHasTransparent: false,
+      recipientHasShielded: true,
+      transparentRecipientZatoshis: null,
+    },
+    shieldedVerification: {
+      txid,
+      txidMatches: true,
+      recipientVerified: true,
+      recipientZatoshis: amountZatoshis,
+      amountVerified: true,
+      expectedZatoshis: amountZatoshis,
+      sapling: true,
+      orchard: false,
+      poolsWithRecipientNotes: ['sapling'],
+      keyHasSapling: true,
+      keyHasOrchard: false,
+    },
+  };
+}
+
 describe('POST /v1/payment-requests', () => {
   it('creates a request with a valid ZIP 321 URI and a share URL without the address', async () => {
     const { status, body } = await create();
@@ -249,7 +285,7 @@ describe('payment purpose (everyday workflow label)', () => {
       url: `/v1/payment-requests/${code}/transactions`,
       payload: { txid },
     });
-    provider.next = { txid, confirmations: 3, broadcast: true, source: 'stub' };
+    provider.next = settledObservation(txid, 3);
     await built.app.inject({
       method: 'POST',
       url: `/v1/payment-requests/${code}/verify`,
@@ -308,7 +344,7 @@ describe('the price-provider key is never exposed', () => {
         url: `/v1/payment-requests/${code}/transactions`,
         payload: { txid },
       });
-      stub.next = { txid, confirmations: 3, broadcast: true, source: 'stub' };
+      stub.next = settledObservation(txid, 3);
       await app.app.inject({
         method: 'POST',
         url: `/v1/payment-requests/${code}/verify`,
@@ -505,7 +541,21 @@ describe('payment lifecycle', () => {
     expect(claim.json().request.status).toBe('TRANSACTION_CREATED');
     expect(claim.json().request.status).not.toBe('CONFIRMED');
 
+    // A mined transaction at full depth, but with no evidence identifying the
+    // recipient: BLINK reports OBSERVED, never CONFIRMED.
     provider.next = { txid, confirmations: 2, broadcast: true, source: 'stub' };
+    const observed = await built.app.inject({
+      method: 'POST',
+      url: `/v1/payment-requests/${code}/verify`,
+      payload: {},
+    });
+    expect(observed.statusCode).toBe(200);
+    expect(observed.json().request.status).toBe('OBSERVED');
+    expect(observed.json().request.confirmations).toBe(2);
+
+    // The recipient viewing key then trial-decrypts a shielded note to the exact
+    // requested address and amount: only now is the request CONFIRMED.
+    provider.next = settledObservation(txid, 2);
     const verify = await built.app.inject({
       method: 'POST',
       url: `/v1/payment-requests/${code}/verify`,
@@ -569,7 +619,18 @@ describe('payment lifecycle', () => {
       url: `/v1/payment-requests/${code}/transactions`,
       payload: { txid },
     });
+    // A confirmed-depth observation alone is OBSERVED, not CONFIRMED.
     provider.next = { txid, confirmations: 3, broadcast: true, source: 'stub' };
+    await built.app.inject({
+      method: 'POST',
+      url: `/v1/payment-requests/${code}/verify`,
+      payload: {},
+    });
+    const unverified = await built.app.inject({ url: `/v1/payment-requests/${code}/receipt` });
+    expect(unverified.statusCode).toBe(409);
+
+    // With viewing-key evidence the request settles and the receipt is issued.
+    provider.next = settledObservation(txid, 3);
     await built.app.inject({
       method: 'POST',
       url: `/v1/payment-requests/${code}/verify`,
@@ -580,7 +641,9 @@ describe('payment lifecycle', () => {
     const r = receipt.json().receipt;
     expect(r.status).toBe('CONFIRMED');
     expect(r.txid).toBe(txid);
-    expect(r.statement).toMatch(/cannot cryptographically prove/i);
+    // The statement is honest about what a viewing key can and cannot establish:
+    // it confirms the shielded note to the requested address, but not the sender.
+    expect(r.statement).toMatch(/cannot identify the sender/i);
   });
 
   it('refuses a second fulfilment of an already-confirmed request', async () => {
@@ -826,6 +889,27 @@ describe('GET /v1/meta/network', () => {
     expect(body.network).toBe('testnet');
     expect(typeof body.verificationProvider).toBe('string');
     expect(typeof body.priceProvider).toBe('string');
+    // Presence-only, and never the key itself.
+    expect(body.recipientViewingKeyConfigured).toBe(false);
+    expect(JSON.stringify(body)).not.toMatch(/uivk|uview/);
+  });
+
+  it('reports the recipient viewing key as configured without ever returning it', async () => {
+    const config = loadConfig({
+      ...baseEnv,
+      BLINK_RECIPIENT_VIEWING_KEY: 'uivktest1qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq',
+    });
+    const app = await buildApp({ config, provider: new StubProvider() });
+    await app.app.ready();
+    try {
+      const res = await app.app.inject({ url: '/v1/meta/network' });
+      const body = res.json();
+      expect(body.recipientViewingKeyConfigured).toBe(true);
+      // The key material must never appear in the response.
+      expect(JSON.stringify(body)).not.toContain('uivktest1qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq');
+    } finally {
+      await app.app.close();
+    }
   });
 
   it('reports mainnet when the API is configured for mainnet', async () => {
@@ -1032,7 +1116,7 @@ describe('payment link states (shareable /pay/<code>)', () => {
       url: `/v1/payment-requests/${code}/transactions`,
       payload: { txid },
     });
-    provider.next = { txid, confirmations: 5, broadcast: true, source: 'stub' };
+    provider.next = settledObservation(txid, 5);
     await built.app.inject({
       method: 'POST',
       url: `/v1/payment-requests/${code}/verify`,
@@ -1094,7 +1178,7 @@ describe('receipt preserves the original USD snapshot and settlement', () => {
       url: `/v1/payment-requests/${code}/transactions`,
       payload: { txid },
     });
-    provider.next = { txid, confirmations: 4, broadcast: true, source: 'stub' };
+    provider.next = settledObservation(txid, 4);
     await built.app.inject({
       method: 'POST',
       url: `/v1/payment-requests/${code}/verify`,
@@ -1244,7 +1328,46 @@ describe('payment is gated on a real network observation', () => {
 
   it('confirms only after a real observation meets the confirmation threshold', async () => {
     const { code, txid } = await createAndClaim();
+    // Depth is met, but a bare observation with no recipient evidence is only
+    // OBSERVED — never CONFIRMED, and no receipt is issued.
     provider.next = { txid, confirmations: 1, broadcast: true, source: 'stub' };
+    const observed = (
+      await built.app.inject({ method: 'POST', url: `/v1/payment-requests/${code}/verify`, payload: {} })
+    ).json();
+    expect(observed.verification.observed).toBe(true);
+    expect(observed.request.status).toBe('OBSERVED');
+    const noReceipt = await built.app.inject({ url: `/v1/payment-requests/${code}/receipt` });
+    expect(noReceipt.statusCode).toBe(409);
+
+    // With a viewing-key-backed shielded note to the exact recipient and amount,
+    // the request settles and the receipt is issued.
+    provider.next = {
+      txid,
+      confirmations: 1,
+      broadcast: true,
+      source: 'stub',
+      evidence: {
+        txid,
+        size: 1000,
+        pools: { transparent: false, sapling: false, orchard: true, shielded: true },
+        recipientHasTransparent: false,
+        recipientHasShielded: true,
+        transparentRecipientZatoshis: null,
+      },
+      shieldedVerification: {
+        txid,
+        txidMatches: true,
+        recipientVerified: true,
+        recipientZatoshis: 25000000,
+        amountVerified: true,
+        expectedZatoshis: 25000000,
+        sapling: false,
+        orchard: true,
+        poolsWithRecipientNotes: ['orchard'],
+        keyHasSapling: false,
+        keyHasOrchard: true,
+      },
+    };
     const verify = (
       await built.app.inject({ method: 'POST', url: `/v1/payment-requests/${code}/verify`, payload: {} })
     ).json();
@@ -1373,7 +1496,7 @@ describe('shielded-payment verification distinguishes pools from public bytes', 
     return { code, txid };
   }
 
-  it('confirms a shielded settlement as shielded activity while marking recipient/amount unverified', async () => {
+  it('reports shielded activity as observed but NOT settled while recipient/amount are unverified', async () => {
     const { code, txid } = await createAndClaim();
     provider.next = {
       txid,
@@ -1394,15 +1517,16 @@ describe('shielded-payment verification distinguishes pools from public bytes', 
       url: `/v1/payment-requests/${code}/verify`,
       payload: {},
     });
-    expect(verify.json().request.status).toBe('CONFIRMED');
+    // A shielded bundle at full depth is still only OBSERVED: it does not name
+    // the recipient or amount, so it must not settle the request.
+    expect(verify.json().request.status).toBe('OBSERVED');
     expect(verify.json().verification.shielded.state).toBe('shielded_activity_observed');
     expect(verify.json().verification.shielded.recipientVerified).toBe(false);
     expect(verify.json().verification.shielded.amountVerified).toBe(false);
 
-    const receipt = (await built.app.inject({ url: `/v1/payment-requests/${code}/receipt` })).json()
-      .receipt;
-    expect(receipt.shieldedVerification.state).toBe('shielded_activity_observed');
-    expect(receipt.statement).toMatch(/cannot name the recipient or amount/i);
+    // No receipt is issued for a merely observed (unsettled) payment.
+    const receipt = await built.app.inject({ url: `/v1/payment-requests/${code}/receipt` });
+    expect(receipt.statusCode).toBe(409);
   });
 
   it('never confirms a settlement that touches no shielded pool (transparent settlement)', async () => {
@@ -1736,5 +1860,249 @@ describe('shielded-payment verification distinguishes pools from public bytes', 
       expect(res.body).not.toContain(sentinel);
       expect(res.body).not.toMatch(/uivk|uview/);
     }
+  });
+});
+
+describe('settlement evidence is required for CONFIRMED and for a receipt', () => {
+  async function createAndClaim(txid: string) {
+    const { body } = await create({ recipientAddress: TEST_SAPLING });
+    const code = body.shortCode;
+    await built.app.inject({
+      method: 'POST',
+      url: `/v1/payment-requests/${code}/transactions`,
+      payload: { txid },
+    });
+    return code;
+  }
+
+  /** A shielded-bundle observation with the recipient/amount evidence the test sets. */
+  function shieldedObservation(
+    txid: string,
+    overrides: Partial<{
+      txidMatches: boolean;
+      recipientVerified: boolean;
+      recipientZatoshis: number;
+      amountVerified: boolean;
+    }> = {},
+  ) {
+    return {
+      txid,
+      confirmations: 3,
+      broadcast: true,
+      source: 'stub',
+      evidence: {
+        txid,
+        size: 1000,
+        pools: { transparent: false, sapling: true, orchard: false, shielded: true },
+        recipientHasTransparent: false,
+        recipientHasShielded: true,
+        transparentRecipientZatoshis: null,
+      },
+      shieldedVerification: {
+        txid,
+        txidMatches: overrides.txidMatches ?? true,
+        recipientVerified: overrides.recipientVerified ?? true,
+        recipientZatoshis: overrides.recipientZatoshis ?? 25000000,
+        amountVerified: overrides.amountVerified ?? true,
+        expectedZatoshis: 25000000,
+        sapling: true,
+        orchard: false,
+        poolsWithRecipientNotes: ['sapling'],
+        keyHasSapling: true,
+        keyHasOrchard: false,
+      },
+    };
+  }
+
+  it('does not confirm a deep observation that pays a different recipient (no recipient evidence)', async () => {
+    const txid = '1'.repeat(64);
+    const code = await createAndClaim(txid);
+    // Full depth, but the engine recovered no note to the requested address.
+    provider.next = shieldedObservation(txid, { recipientVerified: false, recipientZatoshis: 0 });
+    const verify = (
+      await built.app.inject({ method: 'POST', url: `/v1/payment-requests/${code}/verify`, payload: {} })
+    ).json();
+    expect(verify.request.status).toBe('OBSERVED');
+    expect(verify.verification.shielded.recipientVerified).toBe(false);
+    expect((await built.app.inject({ url: `/v1/payment-requests/${code}/receipt` })).statusCode).toBe(409);
+  });
+
+  it('does not confirm a matching recipient when the amount did not match (underpayment)', async () => {
+    const txid = '2'.repeat(64);
+    const code = await createAndClaim(txid);
+    provider.next = shieldedObservation(txid, { amountVerified: false, recipientZatoshis: 100 });
+    const verify = (
+      await built.app.inject({ method: 'POST', url: `/v1/payment-requests/${code}/verify`, payload: {} })
+    ).json();
+    // Recipient matched, amount did not: still not a settlement.
+    expect(verify.request.status).toBe('OBSERVED');
+    expect(verify.verification.shielded.recipientVerified).toBe(true);
+    expect(verify.verification.shielded.amountVerified).toBe(false);
+    expect((await built.app.inject({ url: `/v1/payment-requests/${code}/receipt` })).statusCode).toBe(409);
+  });
+
+  it('does not confirm when the engine could not bind the bytes to the claimed txid', async () => {
+    const txid = '3'.repeat(64);
+    const code = await createAndClaim(txid);
+    provider.next = shieldedObservation(txid, {
+      txidMatches: false,
+      recipientVerified: false,
+      recipientZatoshis: 0,
+      amountVerified: false,
+    });
+    const verify = (
+      await built.app.inject({ method: 'POST', url: `/v1/payment-requests/${code}/verify`, payload: {} })
+    ).json();
+    expect(verify.request.status).toBe('OBSERVED');
+    expect(verify.verification.shielded.keyVerified).toBe(false);
+    expect((await built.app.inject({ url: `/v1/payment-requests/${code}/receipt` })).statusCode).toBe(409);
+  });
+
+  it('settles only when recipient AND amount evidence are both present', async () => {
+    const txid = '4'.repeat(64);
+    const code = await createAndClaim(txid);
+    provider.next = shieldedObservation(txid);
+    const verify = (
+      await built.app.inject({ method: 'POST', url: `/v1/payment-requests/${code}/verify`, payload: {} })
+    ).json();
+    expect(verify.request.status).toBe('CONFIRMED');
+    expect(verify.verification.shielded.keyVerified).toBe(true);
+    expect((await built.app.inject({ url: `/v1/payment-requests/${code}/receipt` })).statusCode).toBe(200);
+  });
+
+  it('does not confirm a transparent settlement of a shielded request, and issues no receipt', async () => {
+    const txid = '5'.repeat(64);
+    const code = await createAndClaim(txid);
+    provider.next = {
+      txid,
+      confirmations: 6,
+      broadcast: true,
+      source: 'stub',
+      evidence: {
+        txid,
+        size: 1000,
+        pools: { transparent: true, sapling: false, orchard: false, shielded: false },
+        recipientHasTransparent: false,
+        recipientHasShielded: true,
+        transparentRecipientZatoshis: null,
+      },
+    };
+    const verify = (
+      await built.app.inject({ method: 'POST', url: `/v1/payment-requests/${code}/verify`, payload: {} })
+    ).json();
+    expect(verify.verification.shielded.state).toBe('transparent_settlement');
+    expect(verify.request.status).not.toBe('CONFIRMED');
+    expect((await built.app.inject({ url: `/v1/payment-requests/${code}/receipt` })).statusCode).toBe(409);
+  });
+
+  it('stays unconfirmed while the verification engine is unavailable (no false success)', async () => {
+    const txid = '6'.repeat(64);
+    const code = await createAndClaim(txid);
+    // The provider/engine could not verify: it reports no observation rather than
+    // guessing. A claimed txid must never become a confirmation.
+    provider.next = null;
+    const verify = (
+      await built.app.inject({ method: 'POST', url: `/v1/payment-requests/${code}/verify`, payload: {} })
+    ).json();
+    expect(verify.verification.observed).toBe(false);
+    expect(verify.request.status).not.toBe('CONFIRMED');
+    expect(verify.request.status).not.toBe('OBSERVED');
+    expect((await built.app.inject({ url: `/v1/payment-requests/${code}/receipt` })).statusCode).toBe(409);
+  });
+
+  it('refuses a receipt for a stale CONFIRMED row that carries no settlement evidence', async () => {
+    // Simulate a row written by an older build: CONFIRMED by depth alone, with no
+    // recipient/amount evidence. The receipt gate must not launder it.
+    const { body } = await create({ recipientAddress: TEST_SAPLING });
+    const code = body.shortCode;
+    await built.db
+      .update(paymentRequests)
+      .set({ status: 'CONFIRMED', shieldedVerification: null as never, txid: 'a'.repeat(64) })
+      .where(eq(paymentRequests.shortCode, code));
+    const receipt = await built.app.inject({ url: `/v1/payment-requests/${code}/receipt` });
+    expect(receipt.statusCode).toBe(409);
+    expect(receipt.json().error).toBe('not_confirmed');
+  });
+
+  it('refuses a receipt when a stored CONFIRMED row carries only shielded-activity evidence', async () => {
+    const { body } = await create({ recipientAddress: TEST_SAPLING });
+    const code = body.shortCode;
+    await built.db
+      .update(paymentRequests)
+      .set({
+        status: 'CONFIRMED',
+        txid: 'b'.repeat(64),
+        shieldedVerification: {
+          state: 'shielded_activity_observed',
+          txid: 'b'.repeat(64),
+          pools: { transparent: false, sapling: true, orchard: false, shielded: true },
+          transparentRecipientZatoshis: null,
+          recipientVerified: false,
+          amountVerified: false,
+          keyVerified: false,
+          source: 'stub',
+          observedAt: '2026-01-01T00:00:00.000Z',
+        } as never,
+      })
+      .where(eq(paymentRequests.shortCode, code));
+    expect((await built.app.inject({ url: `/v1/payment-requests/${code}/receipt` })).statusCode).toBe(409);
+  });
+
+  it('does not downgrade a settled payment when a later verification is weaker', async () => {
+    const txid = '8'.repeat(64);
+    const code = await createAndClaim(txid);
+    provider.next = shieldedObservation(txid);
+    await built.app.inject({ method: 'POST', url: `/v1/payment-requests/${code}/verify`, payload: {} });
+    // A subsequent observation with no evidence must not move CONFIRMED backwards.
+    provider.next = { txid, confirmations: 3, broadcast: true, source: 'stub' };
+    const verify = (
+      await built.app.inject({ method: 'POST', url: `/v1/payment-requests/${code}/verify`, payload: {} })
+    ).json();
+    expect(verify.request.status).toBe('CONFIRMED');
+    expect((await built.app.inject({ url: `/v1/payment-requests/${code}/receipt` })).statusCode).toBe(200);
+  });
+
+  it('repeated verification and polling cannot upgrade an OBSERVED request without evidence', async () => {
+    const txid = '9'.repeat(64);
+    const code = await createAndClaim(txid);
+    provider.next = { txid, confirmations: 3, broadcast: true, source: 'stub' };
+    for (let i = 0; i < 3; i += 1) {
+      const verify = (
+        await built.app.inject({ method: 'POST', url: `/v1/payment-requests/${code}/verify`, payload: {} })
+      ).json();
+      expect(verify.request.status).toBe('OBSERVED');
+      const view = (await built.app.inject({ url: `/v1/payment-requests/${code}` })).json().request;
+      expect(view.status).toBe('OBSERVED');
+      expect((await built.app.inject({ url: `/v1/payment-requests/${code}/receipt` })).statusCode).toBe(409);
+    }
+  });
+
+  it('treats an already-OBSERVED request as paid: no re-initiate, no re-claim', async () => {
+    // OBSERVED is not a settlement, but a mined transaction has already been seen
+    // for this request, so the link must not be presented as unpaid again: a
+    // second payer must not be able to start the flow or overwrite the claim.
+    const txid = 'd'.repeat(64);
+    const code = await createAndClaim(txid);
+    provider.next = { txid, confirmations: 3, broadcast: true, source: 'stub' };
+    const observed = (
+      await built.app.inject({ method: 'POST', url: `/v1/payment-requests/${code}/verify`, payload: {} })
+    ).json();
+    expect(observed.request.status).toBe('OBSERVED');
+
+    const init = await built.app.inject({
+      method: 'POST',
+      url: `/v1/payment-requests/${code}/initiate`,
+      payload: {},
+    });
+    expect(init.statusCode).toBe(409);
+    expect(init.json().error).toBe('already_paid');
+
+    const reclaim = await built.app.inject({
+      method: 'POST',
+      url: `/v1/payment-requests/${code}/transactions`,
+      payload: { txid: 'e'.repeat(64) },
+    });
+    expect(reclaim.statusCode).toBe(409);
+    expect(reclaim.json().error).toBe('already_paid');
   });
 });

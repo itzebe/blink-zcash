@@ -15,8 +15,9 @@ describe('statusEvidence', () => {
     expect(statusEvidence('BROADCAST')).toBe('claimed');
   });
 
-  it('only CONFIRMING and CONFIRMED are observed evidence', () => {
+  it('only CONFIRMING, OBSERVED and CONFIRMED are observed evidence', () => {
     expect(statusEvidence('CONFIRMING')).toBe('observed');
+    expect(statusEvidence('OBSERVED')).toBe('observed');
     expect(statusEvidence('CONFIRMED')).toBe('observed');
   });
 
@@ -46,6 +47,7 @@ describe('statusDetail', () => {
 
   it('explains observed vs awaiting depth', () => {
     expect(statusDetail('CONFIRMING')).toMatch(/required confirmation depth/i);
+    expect(statusDetail('OBSERVED')).toMatch(/not yet a verified settlement/i);
     expect(statusDetail('CONFIRMED')).toMatch(/required confirmation depth/i);
   });
 });
@@ -57,7 +59,10 @@ describe('isPayableStatus', () => {
   });
 
   it('is false for every terminal state', () => {
-    for (const s of ['CONFIRMED', 'FAILED', 'EXPIRED', 'CANCELLED']) {
+    // OBSERVED is non-terminal but is deliberately NOT payable: the request is
+    // settled as far as a second payer is concerned, and a paid link must not be
+    // double-paid while evidence is still being gathered.
+    for (const s of ['OBSERVED', 'CONFIRMED', 'FAILED', 'EXPIRED', 'CANCELLED']) {
       expect(isPayableStatus(s)).toBe(false);
     }
   });

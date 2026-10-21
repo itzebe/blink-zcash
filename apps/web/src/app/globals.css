@@ -1868,6 +1868,67 @@ details.tech .tech__body div + div {
   line-height: 1.5;
 }
 
+.verification__facts {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: 2px;
+}
+
+.verification__fact {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  font-size: 12.5px;
+}
+
+.verification__fact-name {
+  color: var(--muted);
+}
+
+.verification__fact-status {
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: var(--radius-pill);
+  border: 1px solid var(--border-strong);
+  background: var(--surface-3);
+  color: var(--text);
+}
+
+.verification__fact-status--verified {
+  color: var(--success);
+  border-color: rgba(21, 128, 61, 0.35);
+  background: var(--success-bg);
+}
+
+.verification__fact-status--unverified {
+  color: var(--warn);
+  border-color: rgba(180, 83, 9, 0.35);
+  background: var(--warn-bg);
+}
+
+.verification__flag {
+  margin: 2px 0 0;
+  font-size: 12.5px;
+  line-height: 1.45;
+  padding: 8px 10px;
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+  background: var(--surface-3);
+  color: var(--text);
+}
+
+.verification__flag--unavailable {
+  border-color: rgba(180, 83, 9, 0.35);
+  background: var(--warn-bg);
+}
+
+.verification__flag--caveat {
+  border-color: rgba(180, 83, 9, 0.35);
+  background: var(--warn-bg);
+}
+
 .checkout__grid {
   display: grid;
   grid-template-columns: minmax(0, 1.1fr) minmax(0, 0.9fr);

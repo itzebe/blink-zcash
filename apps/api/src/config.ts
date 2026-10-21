@@ -68,9 +68,10 @@ const schema = z.object({
    *
    * Server-side only and optional. It is a viewing key, never a spending key: it
    * cannot move funds. It is never logged, never returned by any route and never
-   * sent to a client. Leave it unset to disable key-based verification (shielded
-   * requests then confirm on observation + depth, with an honest "recipient
-   * unverified" disclosure).
+   * sent to a client. Leave it unset to disable key-based verification. When it
+   * is unset, a shielded request can only ever reach `OBSERVED` (a mined
+   * transaction at full confirmation depth with an honest "recipient unverified"
+   * disclosure); it is never promoted to `CONFIRMED` and no receipt is issued.
    */
   BLINK_RECIPIENT_VIEWING_KEY: z
     .string()

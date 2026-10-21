@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   BLINK_APP_PRIVACY_NOTE,
+  isSettlementEvidence,
   isShieldedVerificationRecord,
   privacyCapability,
   privacyHeadline,
@@ -9,6 +10,7 @@ import {
   readShieldedVerificationRecord,
   shieldedOnlyPolicy,
   withUnifiedReceivers,
+  type ShieldedVerificationRecord,
 } from './privacy.js';
 
 describe('shieldedOnlyPolicy', () => {
@@ -284,6 +286,57 @@ describe('readShieldedVerificationRecord', () => {
   it('drops a malformed record entirely', () => {
     expect(readShieldedVerificationRecord({ txid: 'x' })).toBeNull();
     expect(readShieldedVerificationRecord(null)).toBeNull();
+  });
+});
+
+describe('isSettlementEvidence', () => {
+  function record(
+    state: ShieldedVerificationRecord['state'],
+    amountVerified = false,
+  ): ShieldedVerificationRecord {
+    return {
+      state,
+      txid: 'a'.repeat(64),
+      pools: { transparent: false, sapling: true, orchard: false, shielded: true },
+      transparentRecipientZatoshis: null,
+      recipientVerified: false,
+      amountVerified,
+      keyVerified: false,
+      source: 'test',
+      observedAt: '2026-01-01T00:00:00.000Z',
+    };
+  }
+
+  it('requires amount verification on the transparent route too', () => {
+    // A recipient match without a matching amount is not a settlement, even on
+    // the public route: the merchant must be paid the requested amount.
+    expect(isSettlementEvidence(record('recipient_verified', true))).toBe(true);
+    expect(isSettlementEvidence(record('recipient_verified', false))).toBe(false);
+  });
+
+  it('accepts a viewing-key-verified shielded recipient only when the amount matched', () => {
+    expect(isSettlementEvidence(record('shielded_recipient_verified', true))).toBe(true);
+    // A verified recipient with an unverified amount is NOT a settlement.
+    expect(isSettlementEvidence(record('shielded_recipient_verified', false))).toBe(false);
+  });
+
+  it('rejects every weaker observation', () => {
+    // Confirmation depth, generic shielded activity, a mere shielded bundle, a
+    // transparent settlement or a contradiction are never settlements.
+    for (const state of [
+      'observed',
+      'shielded_activity_observed',
+      'transparent_settlement',
+      'contradictory',
+    ] as const) {
+      expect(isSettlementEvidence(record(state, true))).toBe(false);
+      expect(isSettlementEvidence(record(state, false))).toBe(false);
+    }
+  });
+
+  it('treats a missing record as no settlement', () => {
+    expect(isSettlementEvidence(null)).toBe(false);
+    expect(isSettlementEvidence(undefined)).toBe(false);
   });
 });
 

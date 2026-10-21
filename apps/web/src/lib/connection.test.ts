@@ -11,7 +11,11 @@ import {
 
 /** A queued probe outcome for the fetch stub below. */
 type QueuedResponse =
-  | { kind: 'ready'; network: 'testnet' | 'mainnet' }
+  | {
+      kind: 'ready';
+      network: 'testnet' | 'mainnet';
+      recipientViewingKeyConfigured?: boolean;
+    }
   | { throw: true }
   | { http: number; body?: unknown };
 
@@ -33,7 +37,12 @@ function fetchSequence(responses: QueuedResponse[]) {
     return {
       ok: true,
       status: 200,
-      json: async () => ({ network: next.network }),
+      json: async () => ({
+        network: next.network,
+        ...(next.recipientViewingKeyConfigured === undefined
+          ? {}
+          : { recipientViewingKeyConfigured: next.recipientViewingKeyConfigured }),
+      }),
     };
   });
   return fetchImpl;
@@ -55,6 +64,7 @@ describe('probeNetwork', () => {
     await expect(probeNetwork(fetchImpl, '', 'mainnet')).resolves.toEqual({
       kind: 'ready',
       network: 'mainnet',
+      recipientViewingKeyConfigured: null,
     });
   });
 
@@ -63,7 +73,37 @@ describe('probeNetwork', () => {
     await expect(probeNetwork(fetchImpl, '', '')).resolves.toEqual({
       kind: 'ready',
       network: 'testnet',
+      recipientViewingKeyConfigured: null,
     });
+  });
+
+  it('carries the recipient viewing-key presence flag when the API reports it', async () => {
+    const configured = fetchSequence([
+      { kind: 'ready', network: 'mainnet', recipientViewingKeyConfigured: true },
+    ]);
+    await expect(probeNetwork(configured, '', 'mainnet')).resolves.toEqual({
+      kind: 'ready',
+      network: 'mainnet',
+      recipientViewingKeyConfigured: true,
+    });
+
+    const absent = fetchSequence([
+      { kind: 'ready', network: 'mainnet', recipientViewingKeyConfigured: false },
+    ]);
+    await expect(probeNetwork(absent, '', 'mainnet')).resolves.toEqual({
+      kind: 'ready',
+      network: 'mainnet',
+      recipientViewingKeyConfigured: false,
+    });
+  });
+
+  it('never assumes a viewing key when the API omits the field', async () => {
+    // An older build that does not report the field must not be read as
+    // "configured"; the UI only states unavailability on an explicit false.
+    const fetchImpl = fetchSequence([{ kind: 'ready', network: 'mainnet' }]);
+    const result = await probeNetwork(fetchImpl, '', 'mainnet');
+    expect(result.kind).toBe('ready');
+    expect(result.kind === 'ready' && result.recipientViewingKeyConfigured).toBeNull();
   });
 
   it('reports a mismatch when the build and API disagree', async () => {
@@ -110,12 +150,29 @@ describe('ConnectionMonitor', () => {
     const m = monitor(fetchSequence([{ kind: 'ready', network: 'mainnet' }]));
     m.start();
     await vi.advanceTimersByTimeAsync(0);
-    expect(m.getState()).toEqual({ kind: 'ready', network: 'mainnet' });
+    expect(m.getState()).toEqual({
+      kind: 'ready',
+      network: 'mainnet',
+      recipientViewingKeyConfigured: null,
+    });
 
     const states: string[] = [];
     m.subscribe((s) => states.push(s.kind));
     await vi.advanceTimersByTimeAsync(RECHECK_READY_MS);
     expect(states).toContain('ready');
+  });
+
+  it('carries the recipient viewing-key presence flag into the ready state', async () => {
+    const m = monitor(
+      fetchSequence([{ kind: 'ready', network: 'mainnet', recipientViewingKeyConfigured: true }]),
+    );
+    m.start();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(m.getState()).toEqual({
+      kind: 'ready',
+      network: 'mainnet',
+      recipientViewingKeyConfigured: true,
+    });
   });
 
   it('keeps connecting through a cold start and flags slow after repeated failures', async () => {
@@ -139,7 +196,11 @@ describe('ConnectionMonitor', () => {
     await vi.advanceTimersByTimeAsync(0);
     expect(m.getState().kind).toBe('connecting');
     await vi.advanceTimersByTimeAsync(retryDelayMs(1));
-    expect(m.getState()).toEqual({ kind: 'ready', network: 'mainnet' });
+    expect(m.getState()).toEqual({
+      kind: 'ready',
+      network: 'mainnet',
+      recipientViewingKeyConfigured: null,
+    });
   });
 
   it('reports a mismatch only on a real disagreement', async () => {
@@ -210,7 +271,11 @@ describe('ConnectionMonitor', () => {
     await vi.advanceTimersByTimeAsync(retryDelayMs(1));
     expect(m.getState().kind).toBe('connecting');
     await vi.advanceTimersByTimeAsync(retryDelayMs(2));
-    expect(m.getState()).toEqual({ kind: 'ready', network: 'mainnet' });
+    expect(m.getState()).toEqual({
+      kind: 'ready',
+      network: 'mainnet',
+      recipientViewingKeyConfigured: null,
+    });
   });
 
   it('bounds a hung backend with a timeout and retries instead of hanging forever', async () => {

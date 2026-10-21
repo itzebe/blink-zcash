@@ -87,28 +87,33 @@ byte. Confirmations were derived from the network tip, not assumed.
 
 ### Full API flow (`scripts/live-flow.mjs`)
 
-With the API configured to require 4 confirmations and a transaction taken from
-the newest block:
+The supported flow is **shielded-first**: a request may only name a shielded-only
+recipient (a Sapling address, or a Unified Address with no transparent receiver).
+The script creates a real request to a shielded-only recipient, reconstructs the
+ZIP 321 URI a wallet would scan, claims a real mined txid, and verifies it. With
+no recipient viewing key configured, confirmation depth alone does **not** settle
+the request — the honest ceiling is `OBSERVED`, and no receipt is issued. A
+representative real run (testnet):
 
 ```
-1. CREATE           -> status WAITING_FOR_PAYMENT
-2. CLAIM TXID       -> HTTP 202 | status TRANSACTION_CREATED
-3. VERIFY (1)       -> observed true | confirmations 1 | status CONFIRMING
-   waiting for confirmations (need 4)...
-   observed true | confirmations 38 | status CONFIRMED
-5. RECEIPT          -> HTTP 200 (only issued once CONFIRMED)
-FINAL STATE: CONFIRMED | confirmations: 38
+1. CREATE           -> status WAITING_FOR_PAYMENT | privacy level "shielded"
+2. PAYMENT DETAILS  -> HTTP 200 | addressKind sapling | zcash:ztestsapling1...
+3. CLAIM TXID       -> HTTP 202 | status TRANSACTION_CREATED
+4. VERIFY           -> observed true | confirmations 225 | status OBSERVED
+5. RECEIPT          -> HTTP 409 (a receipt is only issued once CONFIRMED)
+FINAL STATE: OBSERVED | confirmations: 225
 ```
 
-The observed state sequence was produced entirely by the verification provider:
+This is the correct, honest outcome: the transaction is observed at depth, but
+the intended shielded recipient and amount are not established from public data,
+so the request is not confirmed and no receipt is issued. Reaching `CONFIRMED`
+requires a recipient viewing key that trial-decrypts a note to the exact
+requested address (see `security-model.md`).
 
-```
-WAITING_FOR_PAYMENT -> TRANSACTION_CREATED -> CONFIRMING -> CONFIRMED
-```
+`--legacy-transparent` mode is retained only to document that the product API now
+**rejects** a transparent recipient (`400 transparent_recipient`); it is not the
+product flow.
 
-No database field was forced and no confirmation was fabricated. A `verify` call
-against an unreachable endpoint yields `observed:false` and leaves the request
-unconfirmed.
 
 ## What this does and does not prove
 
@@ -125,9 +130,11 @@ Not proven, and deliberately not claimed:
 
 - **Amount and recipient matching.** lightwalletd's `GetTransaction` does not, by
   itself, prove that a specific shielded output paid a specific amount to a
-  specific address. BLINK verifies that a transaction exists and is confirmed;
-  it does not claim `address X sent exactly amount Y to Z` for shielded funds.
-  See `security-model.md`.
+  specific address. BLINK observes that a transaction exists and is mined; on
+  that evidence alone the request is only `OBSERVED`, never `CONFIRMED`, and no
+  receipt is issued. Settlement to `CONFIRMED` requires a recipient viewing key
+  that trial-decrypts a note to the exact requested address and amount (or a
+  public transparent match). See `security-model.md`.
 - **A brand-new broadcast.** A fresh signed transaction was not constructed and
   broadcast from this environment because no funded testnet wallet / signing path
   was available (see below). The live run observed an already-mined testnet

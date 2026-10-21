@@ -45,7 +45,16 @@ export const PROBE_TIMEOUT_MS = 30_000;
 
 export type ConnectionState =
   | { kind: 'connecting'; attempt: number; slow: boolean; reason?: string }
-  | { kind: 'ready'; network: ZcashNetwork }
+  | {
+      kind: 'ready';
+      network: ZcashNetwork;
+      /**
+       * Presence-only: whether the API has a recipient viewing key configured.
+       * `null` means the API did not report it (an older build); it is never read
+       * as "configured". The key value itself is never sent to the browser.
+       */
+      recipientViewingKeyConfigured: boolean | null;
+    }
   | { kind: 'mismatch'; buildNetwork: string; apiNetwork: ZcashNetwork };
 
 /**
@@ -60,7 +69,7 @@ export function retryDelayMs(attempt: number): number {
 }
 
 export type ProbeResult =
-  | { kind: 'ready'; network: ZcashNetwork }
+  | { kind: 'ready'; network: ZcashNetwork; recipientViewingKeyConfigured: boolean | null }
   | { kind: 'mismatch'; buildNetwork: string; apiNetwork: ZcashNetwork }
   | { kind: 'retry'; reason: string };
 
@@ -100,19 +109,28 @@ export async function probeNetwork(
     // A 5xx (typically a 502 from the host) means the service is still waking.
     return { kind: 'retry', reason: `the BLINK service is starting (HTTP ${res.status})` };
   }
-  let network: unknown;
+  let body: unknown;
   try {
-    ({ network } = (await res.json()) as { network?: unknown });
+    body = await res.json();
   } catch {
     return { kind: 'retry', reason: 'the BLINK service returned an unreadable response' };
   }
+  const { network, recipientViewingKeyConfigured } = (body ?? {}) as {
+    network?: unknown;
+    recipientViewingKeyConfigured?: unknown;
+  };
   if (network !== 'testnet' && network !== 'mainnet') {
     return { kind: 'retry', reason: 'the BLINK service did not report a known network' };
   }
   if (buildNetwork && network !== buildNetwork) {
     return { kind: 'mismatch', buildNetwork, apiNetwork: network };
   }
-  return { kind: 'ready', network };
+  return {
+    kind: 'ready',
+    network,
+    recipientViewingKeyConfigured:
+      typeof recipientViewingKeyConfigured === 'boolean' ? recipientViewingKeyConfigured : null,
+  };
 }
 
 export interface ConnectionMonitorOptions {
@@ -239,7 +257,11 @@ export class ConnectionMonitor {
       if (this.stopped) return;
       if (result.kind === 'ready') {
         this.attempt = 0;
-        this.emit({ kind: 'ready', network: result.network });
+        this.emit({
+          kind: 'ready',
+          network: result.network,
+          recipientViewingKeyConfigured: result.recipientViewingKeyConfigured,
+        });
         // Keep confirming the network; a backend that goes away must re-lock the UI.
         this.schedule(RECHECK_READY_MS);
         return;

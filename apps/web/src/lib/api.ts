@@ -137,7 +137,13 @@ export const api = {
   },
 
   /** Authoritative network identity, used by the fail-closed network guard. */
-  getNetwork(): Promise<{ network: 'testnet' | 'mainnet'; verificationProvider: string; priceProvider: string }> {
+  getNetwork(): Promise<{
+    network: 'testnet' | 'mainnet';
+    verificationProvider: string;
+    priceProvider: string;
+    /** Presence-only: whether a recipient viewing key is configured. Never the key. */
+    recipientViewingKeyConfigured?: boolean;
+  }> {
     return request('/v1/meta/network');
   },
 

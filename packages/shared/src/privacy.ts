@@ -194,6 +194,32 @@ export function readShieldedVerificationRecord(value: unknown): ShieldedVerifica
   return { ...record, keyVerified: record.keyVerified === true };
 }
 
+/**
+ * Whether a verification record is evidence that the request was settled by the
+ * *intended recipient* for the *requested amount* — the only basis for marking a
+ * payment CONFIRMED or issuing a merchant receipt.
+ *
+ * True only for:
+ *   - `shielded_recipient_verified` with `amountVerified` — a recipient viewing
+ *     key trial-decrypted a shielded note to the exact requested address for the
+ *     exact requested amount, or
+ *   - `recipient_verified` with `amountVerified` — the transaction provably pays
+ *     the requested transparent receiver the requested amount.
+ *
+ * Confirmation depth, a payer-supplied txid, generic shielded-pool activity, a
+ * mere shielded bundle, a matching amount without a recipient match, or a
+ * matching recipient without a matching amount are all explicitly NOT
+ * settlements. A `null` record (no evidence, a legacy row, or a malformed blob)
+ * is not a settlement either.
+ */
+export function isSettlementEvidence(
+  record: ShieldedVerificationRecord | null | undefined,
+): boolean {
+  if (!record) return false;
+  if (record.state === 'recipient_verified') return record.amountVerified === true;
+  return record.state === 'shielded_recipient_verified' && record.amountVerified === true;
+}
+
 /** Public facts a verification provider could establish about a transaction. */
 export interface TxPoolReport {
   transparent: boolean;

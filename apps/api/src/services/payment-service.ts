@@ -18,6 +18,7 @@ import {
   parseZecToZatoshis,
   privacyCapability,
   readShieldedVerificationRecord,
+  isSettlementEvidence,
   shieldedOnlyPolicy,
   withUnifiedReceivers,
   type Currency,
@@ -633,7 +634,12 @@ export class PaymentService {
     if (!row) throw new PaymentRequestError('payment request not found', 'not_found', 404);
     const status = await this.effectiveStatus(row);
 
-    if (status === 'CONFIRMED' || status === 'BROADCAST' || status === 'CONFIRMING') {
+    if (
+      status === 'CONFIRMED' ||
+      status === 'OBSERVED' ||
+      status === 'BROADCAST' ||
+      status === 'CONFIRMING'
+    ) {
       throw new PaymentRequestError(
         'this payment request has already been paid',
         'already_paid',
@@ -669,7 +675,7 @@ export class PaymentService {
     if (!row) throw new PaymentRequestError('payment request not found', 'not_found', 404);
 
     const status = await this.effectiveStatus(row);
-    if (status === 'CONFIRMED') {
+    if (status === 'CONFIRMED' || status === 'OBSERVED') {
       throw new PaymentRequestError(
         'this payment request has already been paid',
         'already_paid',
@@ -792,11 +798,20 @@ export class PaymentService {
       shieldedRecord?.state === 'transparent_settlement' ||
       shieldedRecord?.state === 'contradictory';
 
+    // Settlement is established ONLY by evidence that identifies the intended
+    // recipient and the requested amount: a recipient viewing key trial-decrypted
+    // a shielded note to the exact requested address (`shielded_recipient_verified`
+    // with the amount confirmed), or the transaction provably pays the requested
+    // transparent receiver (`recipient_verified`). A mined transaction at full
+    // depth with no such evidence is a weak observation, never a settlement.
+    const settles = isSettlementEvidence(shieldedRecord);
+
     let next: PaymentStatus;
     if (contradictsShielded) {
       next = 'UNKNOWN';
     } else if (observation.confirmations >= required && required > 0) {
-      next = 'CONFIRMED';
+      // Deep enough to count, but only a settlement once the evidence proves it.
+      next = settles ? 'CONFIRMED' : 'OBSERVED';
     } else if (observation.confirmations > 0) {
       next = 'CONFIRMING';
     } else if (observation.broadcast) {
@@ -805,10 +820,24 @@ export class PaymentService {
       next = current.status as PaymentStatus;
     }
 
+    // Settlement evidence is monotonic. Once a request has been CONFIRMED, a
+    // later, weaker observation of the SAME transaction (e.g. a provider that
+    // cannot trial-decrypt, or an engine that is briefly unavailable) must not
+    // overwrite the record that established the settlement — otherwise a settled
+    // payment would be left with `status = CONFIRMED` but no settlement evidence,
+    // and the receipt gate would (correctly) refuse it. A confirmed payment is
+    // terminal, so its evidence is frozen. Keyed by txid so a record is never
+    // carried across two different transactions. This never upgrades a row.
+    const currentRecord = readShieldedVerificationRecord(current.shieldedVerification);
+    const preserveSettlement =
+      current.status === 'CONFIRMED' &&
+      observation.txid === current.txid &&
+      isSettlementEvidence(currentRecord);
+
     const patch: Partial<typeof paymentRequests.$inferInsert> = {
       txid: observation.txid,
       confirmations: observation.confirmations,
-      shieldedVerification: shieldedRecord,
+      shieldedVerification: preserveSettlement ? current.shieldedVerification : shieldedRecord,
       updatedAt: this.now(),
     };
 
