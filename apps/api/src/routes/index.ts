@@ -104,6 +104,10 @@ export async function registerRoutes(app: FastifyInstance, deps: RouteDeps): Pro
     // key is empty, so this distinguishes "not configured" from "configured but
     // failing" without exposing the secret.
     priceKeyConfigured: config.COINMARKETCAP_API_KEY.length > 0,
+    // The exact revision serving traffic, when the platform provides it
+    // (Render sets RENDER_GIT_COMMIT). Non-secret. Lets an operator confirm which
+    // build is live; a liveness check alone cannot prove the revision.
+    revision: config.RENDER_GIT_COMMIT?.slice(0, 12) ?? null,
   }));
 
   /**

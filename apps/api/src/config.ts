@@ -13,6 +13,14 @@ const schema = z.object({
   HOST: z.string().default('0.0.0.0'),
   APP_BASE_URL: z.string().url().default('http://localhost:3000'),
 
+  /**
+   * The git revision this process was built from, when the platform provides it
+   * (Render sets `RENDER_GIT_COMMIT`). Non-secret and read-only; surfaced by
+   * `/health` so an operator can confirm *which* build is live — a health check
+   * alone cannot. Absent locally.
+   */
+  RENDER_GIT_COMMIT: z.string().optional(),
+
   DATABASE_URL: z.string().default('postgres://blink:blink_dev_pw@127.0.0.1:5432/blink'),
 
   ZCASH_NETWORK: z.enum(['testnet', 'mainnet']).default('testnet'),

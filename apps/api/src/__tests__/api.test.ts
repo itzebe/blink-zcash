@@ -858,6 +858,20 @@ describe('GET /health', () => {
     expect(res.json().verificationProvider).toBe('none');
     // Presence-only diagnostic: never the key value, just whether one is loaded.
     expect(res.json().priceKeyConfigured).toBe(false);
+    // No platform revision locally: honest null, never a fabricated value.
+    expect(res.json().revision).toBeNull();
+  });
+
+  it('reports the platform revision when the environment provides one', async () => {
+    const config = loadConfig({ ...baseEnv, RENDER_GIT_COMMIT: 'abcdef0123456789' });
+    const app = await buildApp({ config, provider: new StubProvider() });
+    await app.app.ready();
+    try {
+      const res = await app.app.inject({ url: '/health' });
+      expect(res.json().revision).toBe('abcdef012345');
+    } finally {
+      await app.app.close();
+    }
   });
 
   it('reports priceKeyConfigured true when a CoinMarketCap key is loaded', async () => {
