@@ -213,6 +213,15 @@ fn orchard_key(f: &OrchardFixture) -> RecipientViewingKey {
     RecipientViewingKey::parse(&f.uivk, BlinkNetwork::Testnet).expect("parse uivk")
 }
 
+/// The Unified *Full* Viewing Key (`uview…`) for the same Orchard account as
+/// `orchard_account(seed, index)`. Wallets commonly export this form.
+fn orchard_ufvk(seed: [u8; 32]) -> String {
+    let sk = SpendingKey::from_bytes(seed).expect("spending key");
+    let fvk = FullViewingKey::from(&sk);
+    let ufvk = zcash_keys::keys::UnifiedFullViewingKey::new(None, Some(fvk)).expect("build ufvk");
+    ufvk.encode(&TEST_NETWORK)
+}
+
 // --- Orchard tests ----------------------------------------------------------
 
 #[test]
@@ -251,6 +260,62 @@ fn orchard_recipient_and_amount_are_verified() {
     assert_eq!(v.pools_with_recipient_notes, vec!["orchard".to_string()]);
     assert!(v.key_has_orchard);
     assert!(!v.key_has_sapling);
+}
+
+/// A Unified *Full* Viewing Key (`uview…`) — the form wallets most commonly
+/// export — must verify a shielded payment exactly as the Unified Incoming
+/// Viewing Key does. The full key's incoming-viewing form is derived internally.
+#[test]
+fn orchard_unified_full_viewing_key_verifies_identically() {
+    let f = orchard_fixture();
+    let info = blink_zcash::decode_transaction(&f.bytes, Some("nu5")).expect("decode");
+
+    let ufvk = orchard_ufvk([3u8; 32]);
+    assert!(
+        ufvk.starts_with("uviewtest") || ufvk.starts_with("uvftest"),
+        "expected a UFVK encoding, got {ufvk}"
+    );
+
+    let key = RecipientViewingKey::parse(&ufvk, BlinkNetwork::Testnet).expect("parse ufvk");
+    let v = blink_zcash::verify_shielded_payment(
+        &f.bytes,
+        Some("nu5"),
+        &key,
+        &f.ua,
+        Some(VALUE),
+        Some(&info.txid),
+    )
+    .expect("verify");
+
+    assert!(v.txid_matches);
+    assert!(v.recipient_verified, "UFVK must verify the recipient");
+    assert_eq!(v.recipient_zatoshis, VALUE);
+    assert!(v.amount_verified, "UFVK must verify the amount");
+    assert!(v.key_has_orchard);
+    assert!(!v.key_has_sapling);
+}
+
+/// A UFVK for a different account must not credit the requested recipient.
+#[test]
+fn orchard_unified_full_viewing_key_for_other_account_is_not_credited() {
+    let f = orchard_fixture();
+    let info = blink_zcash::decode_transaction(&f.bytes, Some("nu5")).expect("decode");
+
+    let other = orchard_ufvk([4u8; 32]);
+    let key = RecipientViewingKey::parse(&other, BlinkNetwork::Testnet).expect("parse ufvk");
+    let v = blink_zcash::verify_shielded_payment(
+        &f.bytes,
+        Some("nu5"),
+        &key,
+        &f.ua,
+        Some(VALUE),
+        Some(&info.txid),
+    )
+    .expect("verify");
+
+    assert!(!v.recipient_verified);
+    assert_eq!(v.recipient_zatoshis, 0);
+    assert!(!v.amount_verified);
 }
 
 #[test]

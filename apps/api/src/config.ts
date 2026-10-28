@@ -178,18 +178,33 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
   // call, so a key that passes here but is wrong for the network cannot verify.
   if (parsed.BLINK_RECIPIENT_VIEWING_KEY) {
     const k = parsed.BLINK_RECIPIENT_VIEWING_KEY;
-    // A testnet key is `uivktest…`/`uviewtest…`, which also starts with `uivk`/
-    // `uview`, so the testnet check must come first.
-    const looksTestnet = k.startsWith('uivktest') || k.startsWith('uviewtest');
-    const looksMainnet = !looksTestnet && (k.startsWith('uivk') || k.startsWith('uview'));
+    // ZIP 316 defines four Unified viewing-key prefixes across two revisions:
+    //   R0 incoming `uivk…`, R0 full `uview…`,
+    //   R2 incoming `uvi…`,  R2 full `uvf…`.
+    // The official `zcash_keys` crate emits R2 by default and accepts both on
+    // decode, so all four must be accepted here or a valid, wallet-exported key
+    // would be refused at boot. A testnet prefix also starts with its mainnet
+    // prefix (`uvitest`/`uvftest` start with `uvi`/`uvf`), so the testnet check
+    // must come first.
+    const looksTestnet =
+      k.startsWith('uivktest') ||
+      k.startsWith('uviewtest') ||
+      k.startsWith('uvitest') ||
+      k.startsWith('uvftest');
+    const looksMainnet =
+      !looksTestnet &&
+      (k.startsWith('uivk') ||
+        k.startsWith('uview') ||
+        k.startsWith('uvi') ||
+        k.startsWith('uvf'));
     if (parsed.ZCASH_NETWORK === 'mainnet' && !looksMainnet) {
       throw new Error(
-        'BLINK_RECIPIENT_VIEWING_KEY does not look like a mainnet Unified viewing key (uivk…/uview…)',
+        'BLINK_RECIPIENT_VIEWING_KEY does not look like a mainnet Unified viewing key (uivk…/uview…/uvi…/uvf…)',
       );
     }
     if (parsed.ZCASH_NETWORK === 'testnet' && !looksTestnet) {
       throw new Error(
-        'BLINK_RECIPIENT_VIEWING_KEY does not look like a testnet Unified viewing key (uivktest…/uviewtest…)',
+        'BLINK_RECIPIENT_VIEWING_KEY does not look like a testnet Unified viewing key (uivktest…/uviewtest…/uvitest…/uvftest…)',
       );
     }
   }
