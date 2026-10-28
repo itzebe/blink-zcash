@@ -93,8 +93,23 @@ struct InspectResponse {
     receivers: blink_zcash::ReceiverPools,
 }
 
+/// The git revision this binary was built from, when the platform provides it
+/// (Render sets `RENDER_GIT_COMMIT`). Non-secret and read-only: it lets an
+/// operator confirm *which* build is live, which a liveness probe alone cannot.
+fn build_revision() -> Option<String> {
+    std::env::var("RENDER_GIT_COMMIT")
+        .ok()
+        .map(|v| v.trim().to_string())
+        .filter(|v| !v.is_empty())
+        .map(|v| v.chars().take(12).collect())
+}
+
 async fn health() -> impl IntoResponse {
-    Json(serde_json::json!({ "status": "ok", "service": "blink-zcash" }))
+    Json(serde_json::json!({
+        "status": "ok",
+        "service": "blink-zcash",
+        "revision": build_revision(),
+    }))
 }
 
 async fn inspect(
