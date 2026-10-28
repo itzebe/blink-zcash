@@ -136,6 +136,18 @@ services:
       # set it in the Render Dashboard, never in source control.
       - key: COINMARKETCAP_API_KEY
         sync: false
+      # Recipient Unified viewing key (server-side secret). It is the ONLY
+      # evidence that can promote a shielded request to CONFIRMED and issue a
+      # receipt: the provider trial-decrypts the transaction's shielded outputs
+      # and requires a note addressed to the exact requested recipient and
+      # amount. Without it a shielded request can only ever reach OBSERVED. A
+      # viewing key cannot spend. Declared here so the requirement is visible in
+      # infrastructure-as-code and a rebuilt Blueprint prompts for it; because
+      # it is `sync: false` its value lives only in the Dashboard, never in
+      # source. Paste a mainnet Unified viewing key (R0 `uivk…`/`uview…` or R2
+      # `uvi…`/`uvf…`). Never a spending key, never a `…test` key on mainnet.
+      - key: BLINK_RECIPIENT_VIEWING_KEY
+        sync: false
       # Public base URL of the web app (used to build share links). Paste the
       # blink-web URL after the first deploy, e.g. https://blink-web.onrender.com
       - key: APP_BASE_URL
