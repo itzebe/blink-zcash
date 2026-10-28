@@ -464,4 +464,59 @@ describe('LightwalletdProvider', () => {
     expect(obs).not.toBeNull();
     expect(obs!.shieldedVerification).toBeUndefined();
   });
+
+  it('uses the request-supplied viewing key with no operator key configured', async () => {
+    // Multi-user: the request carries its own key, so shielded verification is
+    // possible even when the operator configured none.
+    const calls: Calls = { closed: false };
+    let seenKey: string | undefined;
+    const base = fakeEngine({ shieldedVerification: verifiedShielded() });
+    const engine: ZcashEngine = {
+      ...base,
+      async verifyShielded(data: string, options: VerifyShieldedOptions) {
+        seenKey = options.viewingKey;
+        return base.verifyShielded(data, options);
+      },
+    };
+    const provider = providerWith({ calls, data: bytes, minedHeight: 990, tipHeight: 1000, engine });
+    const obs = await provider.observe({
+      claimedTxid: CLAIMED_TXID,
+      network: 'testnet',
+      expectedAddress: 'utest1recipient',
+      expectedZatoshis: 25000000,
+      recipientViewingKey: 'uivktest1requestkey',
+    });
+    expect(seenKey).toBe('uivktest1requestkey');
+    expect(obs!.shieldedVerification?.recipientVerified).toBe(true);
+  });
+
+  it('prefers the request-supplied key over an operator-configured key', async () => {
+    const calls: Calls = { closed: false };
+    let seenKey: string | undefined;
+    const base = fakeEngine({ shieldedVerification: verifiedShielded() });
+    const engine: ZcashEngine = {
+      ...base,
+      async verifyShielded(data: string, options: VerifyShieldedOptions) {
+        seenKey = options.viewingKey;
+        return base.verifyShielded(data, options);
+      },
+    };
+    const provider = providerWith({
+      calls,
+      data: bytes,
+      minedHeight: 990,
+      tipHeight: 1000,
+      recipientViewingKey: 'uivktest1operatorkey',
+      engine,
+    });
+    const obs = await provider.observe({
+      claimedTxid: CLAIMED_TXID,
+      network: 'testnet',
+      expectedAddress: 'utest1recipient',
+      expectedZatoshis: 25000000,
+      recipientViewingKey: 'uivktest1requestkey',
+    });
+    expect(seenKey).toBe('uivktest1requestkey');
+    expect(obs!.shieldedVerification?.recipientVerified).toBe(true);
+  });
 });

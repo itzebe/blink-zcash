@@ -1425,6 +1425,15 @@ describe('engine error classification', () => {
     async decodeTransaction(): Promise<never> {
       throw this.error;
     }
+    async inspectTransaction(): Promise<never> {
+      throw this.error;
+    }
+    async verifyShielded(): Promise<never> {
+      throw this.error;
+    }
+    async inspectViewingKey(): Promise<never> {
+      throw this.error;
+    }
   }
 
   async function appWithEngine(error: Error) {
@@ -2104,5 +2113,274 @@ describe('settlement evidence is required for CONFIRMED and for a receipt', () =
     });
     expect(reclaim.statusCode).toBe(409);
     expect(reclaim.json().error).toBe('already_paid');
+  });
+});
+
+describe('multi-user verification: a request carries its own viewing key', () => {
+  /**
+   * A stub engine whose key/address association each test sets explicitly, and
+   * which records the viewing key it was asked to trial-decrypt with. This
+   * exercises the real create -> bind -> verify wiring without a live engine.
+   */
+  class AssocEngine implements ZcashEngine {
+    readonly configured = true;
+    /** Whether the next inspectViewingKey reports an address match. */
+    matches: boolean | null = true;
+    /** The key the last verifyShielded was called with. */
+    seenVerifyKey: string | undefined;
+    inspectCalls = 0;
+
+    async ping() {
+      return true;
+    }
+    async inspectAddress() {
+      return {
+        value: {
+          address: TEST_SAPLING,
+          kind: 'sapling' as const,
+          network: 'testnet' as const,
+          canReceiveMemo: true,
+          receivers: {
+            transparent: false,
+            sapling: true,
+            orchard: false,
+            shielded: true,
+            transparentOnly: false,
+            unknown: false,
+          },
+        },
+        authoritative: true,
+      };
+    }
+    async buildUri() {
+      return { value: 'zcash:ztestsapling1stub?amount=0.25', authoritative: true };
+    }
+    async decodeTransaction() {
+      throw new Error('not used');
+    }
+    async inspectTransaction() {
+      throw new Error('not used');
+    }
+    async verifyShielded(_data: string, options: { viewingKey: string }) {
+      this.seenVerifyKey = options.viewingKey;
+      return {
+        value: {
+          txid: 'a'.repeat(64),
+          txidMatches: true,
+          recipientVerified: true,
+          recipientZatoshis: 25000000,
+          amountVerified: true,
+          expectedZatoshis: 25000000,
+          sapling: true,
+          orchard: false,
+          poolsWithRecipientNotes: ['sapling'],
+          keyHasSapling: true,
+          keyHasOrchard: false,
+        },
+        authoritative: true,
+      };
+    }
+    async inspectViewingKey() {
+      this.inspectCalls += 1;
+      return {
+        value: {
+          valid: true,
+          network: 'testnet' as const,
+          sapling: true,
+          orchard: false,
+          addressMatchesKey: this.matches,
+        },
+        authoritative: true,
+      };
+    }
+  }
+
+  let engine: AssocEngine;
+  let stub: StubProvider;
+  let app: BuiltApp;
+
+  beforeAll(async () => {
+    const config = loadConfig({ ...baseEnv, BLINK_ZCASH_SERVICE_URL: 'https://engine.test' });
+    engine = new AssocEngine();
+    stub = new StubProvider();
+    app = await buildApp({ config, provider: stub, engine });
+    await app.app.ready();
+  });
+
+  afterAll(async () => {
+    await app.app.close();
+  });
+
+  beforeEach(async () => {
+    engine.matches = true;
+    engine.seenVerifyKey = undefined;
+    engine.inspectCalls = 0;
+    stub.next = null;
+    await app.db.delete(paymentRequests);
+  });
+
+  async function createWithKey(recipientViewingKey: unknown, overrides: Record<string, unknown> = {}) {
+    return app.app.inject({
+      method: 'POST',
+      url: '/v1/payment-requests',
+      payload: {
+        recipientName: 'Multi',
+        recipientAddress: TEST_SAPLING,
+        amount: '0.25',
+        expiryMinutes: 30,
+        recipientViewingKey,
+        ...overrides,
+      },
+    });
+  }
+
+  it('accepts a key bound to the recipient and never echoes it back', async () => {
+    const res = await createWithKey('uivktest1requestkey');
+    expect(res.statusCode).toBe(201);
+    const body = res.json();
+    // The key must never appear in any client-visible field.
+    expect(res.body).not.toContain('uivktest1requestkey');
+    expect(body.request).not.toHaveProperty('recipientViewingKey');
+    expect(body.request).not.toHaveProperty('recipientViewingKeyEncrypted');
+    expect(engine.inspectCalls).toBe(1);
+  });
+
+  it('rejects a key that does not belong to the recipient', async () => {
+    engine.matches = false;
+    const res = await createWithKey('uivktest1wrongaccount');
+    expect(res.statusCode).toBe(400);
+    expect(res.json().error).toBe('viewing_key_mismatch');
+  });
+
+  it('rejects a malformed key (engine rejection) without storing it', async () => {
+    const config = loadConfig({ ...baseEnv, BLINK_ZCASH_SERVICE_URL: 'https://engine.test' });
+    class RejectEngine extends AssocEngine {
+      override async inspectViewingKey(): Promise<never> {
+        throw new EngineUnavailableError('not a Unified viewing key', 'rejected');
+      }
+    }
+    const rejecting = await buildApp({
+      config,
+      provider: new StubProvider(),
+      engine: new RejectEngine(),
+    });
+    await rejecting.app.ready();
+    try {
+      const res = await rejecting.app.inject({
+        method: 'POST',
+        url: '/v1/payment-requests',
+        payload: {
+          recipientName: 'Bad',
+          recipientAddress: TEST_SAPLING,
+          amount: '0.25',
+          expiryMinutes: 30,
+          recipientViewingKey: 'not-a-key',
+        },
+      });
+      expect(res.statusCode).toBe(400);
+      expect(res.json().error).toBe('invalid_viewing_key');
+    } finally {
+      await rejecting.app.close();
+    }
+  });
+
+  it('stores the request key encrypted and never in the clear', async () => {
+    const res = await createWithKey('uivktest1secretmaterial');
+    expect(res.statusCode).toBe(201);
+    const rows = await app.db.select().from(paymentRequests);
+    const row = rows.find((r) => r.shortCode === res.json().shortCode)!;
+    expect(row.recipientViewingKeyEncrypted).toBeTruthy();
+    expect(row.recipientViewingKeyEncrypted).not.toContain('uivktest1secretmaterial');
+    // No plaintext column exists on the row at all.
+    expect(Object.keys(row)).not.toContain('recipientViewingKey');
+  });
+
+  it('threads the decrypted request key into the provider on verify (multi-user)', async () => {
+    // A provider that records the key the service hands it, so we can prove the
+    // request's own key — not an operator key — reaches the verification layer.
+    const seen: (string | undefined)[] = [];
+    const recording = await buildApp({
+      config: loadConfig({ ...baseEnv, BLINK_ZCASH_SERVICE_URL: 'https://engine.test' }),
+      engine,
+      provider: {
+        name: 'recording',
+        async observe(context) {
+          seen.push(context.recipientViewingKey);
+          return null;
+        },
+      },
+    });
+    await recording.app.ready();
+    try {
+      const created = await recording.app.inject({
+        method: 'POST',
+        url: '/v1/payment-requests',
+        payload: {
+          recipientName: 'Multi',
+          recipientAddress: TEST_SAPLING,
+          amount: '0.25',
+          expiryMinutes: 30,
+          recipientViewingKey: 'uivktest1requestkey',
+        },
+      });
+      const code = created.json().shortCode;
+      const txid = 'b'.repeat(64);
+      await recording.app.inject({
+        method: 'POST',
+        url: `/v1/payment-requests/${code}/transactions`,
+        payload: { txid },
+      });
+      const verify = await recording.app.inject({
+        method: 'POST',
+        url: `/v1/payment-requests/${code}/verify`,
+        payload: {},
+      });
+      expect(verify.statusCode).toBe(200);
+      expect(seen).toContain('uivktest1requestkey');
+    } finally {
+      await recording.app.close();
+    }
+  });
+
+  it('a request with no key never sends a key to the provider', async () => {
+    const seen: (string | undefined)[] = [];
+    const recording = await buildApp({
+      config: loadConfig({ ...baseEnv, BLINK_ZCASH_SERVICE_URL: 'https://engine.test' }),
+      engine,
+      provider: {
+        name: 'recording',
+        async observe(context) {
+          seen.push(context.recipientViewingKey);
+          return null;
+        },
+      },
+    });
+    await recording.app.ready();
+    try {
+      const created = await recording.app.inject({
+        method: 'POST',
+        url: '/v1/payment-requests',
+        payload: {
+          recipientName: 'NoKey',
+          recipientAddress: TEST_SAPLING,
+          amount: '0.25',
+          expiryMinutes: 30,
+        },
+      });
+      const code = created.json().shortCode;
+      await recording.app.inject({
+        method: 'POST',
+        url: `/v1/payment-requests/${code}/transactions`,
+        payload: { txid: 'c'.repeat(64) },
+      });
+      await recording.app.inject({
+        method: 'POST',
+        url: `/v1/payment-requests/${code}/verify`,
+        payload: {},
+      });
+      expect(seen.every((k) => k === undefined)).toBe(true);
+    } finally {
+      await recording.app.close();
+    }
   });
 });

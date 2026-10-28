@@ -45,6 +45,12 @@ const engine: ZcashEngine = {
       authoritative: true,
     };
   },
+  async verifyShielded() {
+    throw new Error('not used');
+  },
+  async inspectViewingKey() {
+    throw new Error('not used');
+  },
 };
 
 function loadServiceDefinition(): grpc.ServiceDefinition {

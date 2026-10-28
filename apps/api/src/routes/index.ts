@@ -70,6 +70,14 @@ const createSchema = z.object({
   label: z.string().max(100).nullish(),
   message: z.string().max(500).nullish(),
   expiryMinutes: z.number().int().optional(),
+  /**
+   * The requester's own recipient Unified viewing key, when supplied. Enables
+   * multi-user shielded verification: the key is bound to this request's
+   * recipient, encrypted at rest, and used to trial-decrypt the eventual
+   * transaction. Never returned by any route. Optional: without it a request
+   * still works, but a shielded settlement can only ever reach OBSERVED.
+   */
+  recipientViewingKey: z.string().min(1).max(400).nullish(),
 });
 
 const claimSchema = z.object({ txid: z.string().regex(/^[0-9a-fA-F]{64}$/) });

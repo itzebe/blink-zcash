@@ -65,6 +65,14 @@ export interface CreatePaymentRequestInput {
   purpose?: PaymentPurpose;
   expiryMinutes?: number;
   ownerId?: string | null;
+  /**
+   * The requester's own recipient Unified viewing key, when supplied. This makes
+   * shielded verification multi-user: the key is bound to *this* request's
+   * recipient and used to trial-decrypt the eventual transaction, instead of
+   * relying on a single operator-configured key. It is validated against the
+   * recipient address, encrypted at rest, and never returned by any route.
+   */
+  recipientViewingKey?: string | null;
 }
 
 export class PaymentRequestError extends Error {
@@ -209,6 +217,63 @@ export class PaymentService {
       'BLINK could not confirm a shielded-only receiver in this recipient address',
       'shielded_receiver_unconfirmed',
     );
+  }
+
+  /**
+   * Establish that a supplied viewing key can actually verify this recipient.
+   *
+   * A Unified viewing key is scoped to a whole account, so a key that does not
+   * belong to the recipient's account can never trial-decrypt a note to that
+   * recipient. Binding the key to the recipient up front stops a requester from
+   * storing a key that would silently never verify anything, and stops a
+   * mismatched key from ever being associated with a payment request.
+   *
+   * Fails closed: a malformed/wrong-network key, a key with no shielded
+   * component, or a key that cannot derive the recipient is rejected. It only
+   * succeeds on an authoritative engine confirmation (`addressMatchesKey: true`).
+   * Without a configured engine the key cannot be bound, so it is refused.
+   */
+  private async assertViewingKeyMatchesRecipient(
+    viewingKey: string,
+    recipientAddress: string,
+  ): Promise<void> {
+    if (!this.opts.engine.configured) {
+      throw new PaymentRequestError(
+        'a viewing key cannot be attached without the authoritative engine configured',
+        'engine_unavailable',
+        503,
+      );
+    }
+    let matches: boolean | null;
+    try {
+      const result = await this.callEngine(() =>
+        this.opts.engine.inspectViewingKey({
+          network: this.opts.network,
+          viewingKey,
+          expectedAddress: recipientAddress,
+        }),
+      );
+      matches = result.value.addressMatchesKey;
+    } catch (err) {
+      if (err instanceof EngineUnavailableError && err.reason === 'rejected') {
+        throw new PaymentRequestError(
+          `recipient viewing key rejected: ${err.message}`,
+          'invalid_viewing_key',
+          400,
+        );
+      }
+      throw new PaymentRequestError(
+        `could not validate the recipient viewing key: ${(err as Error).message}`,
+        'engine_unavailable',
+        503,
+      );
+    }
+    if (matches !== true) {
+      throw new PaymentRequestError(
+        'the supplied viewing key does not belong to the recipient address; it could never verify this payment',
+        'viewing_key_mismatch',
+      );
+    }
   }
 
   /**
@@ -452,6 +517,15 @@ export class PaymentService {
     // embeds the recipient address, so it is reconstructed on demand instead.
     const uri = await this.buildUri(input.recipientAddress, canonicalAmount, memo, label, message);
 
+    // Validate the request's own viewing key, when supplied, and bind it to this
+    // recipient. A key that does not belong to the recipient's account can never
+    // verify the payment, so it is refused up front rather than stored to fail
+    // silently later. The key is only ever encrypted at rest.
+    const viewingKey = input.recipientViewingKey?.trim() || null;
+    if (viewingKey) {
+      await this.assertViewingKeyMatchesRecipient(viewingKey, input.recipientAddress);
+    }
+
     const now = this.now();
     const expiresAt = new Date(now.getTime() + expiryMinutes * 60_000);
 
@@ -467,6 +541,7 @@ export class PaymentService {
         recipientAddressEncrypted: encrypted,
         recipientAddressKind: kind,
         recipientAddressFingerprint: fingerprint,
+        recipientViewingKeyEncrypted: viewingKey ? this.opts.crypto.encrypt(viewingKey) : null,
         amount: canonicalAmount,
         currency: resolved.currency,
         purpose,
@@ -739,11 +814,24 @@ export class PaymentService {
       expectedZatoshis = undefined;
     }
 
+    // The request's own recipient viewing key, when the requester supplied one.
+    // Decrypted in-process only for this provider call; it makes shielded
+    // verification multi-user. It is never logged or returned.
+    let requestViewingKey: string | undefined;
+    if (current.recipientViewingKeyEncrypted) {
+      try {
+        requestViewingKey = this.opts.crypto.decrypt(current.recipientViewingKeyEncrypted);
+      } catch {
+        requestViewingKey = undefined;
+      }
+    }
+
     const observation = await this.opts.provider.observe({
       claimedTxid: current.claimedTxid ?? undefined,
       network: current.network as ZcashNetwork,
       ...(expectedAddress ? { expectedAddress } : {}),
       ...(expectedZatoshis !== undefined ? { expectedZatoshis } : {}),
+      ...(requestViewingKey ? { recipientViewingKey: requestViewingKey } : {}),
     });
 
     if (!observation) {

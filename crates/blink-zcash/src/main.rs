@@ -272,6 +272,37 @@ async fn verify_shielded(
     Ok(Json(verification))
 }
 
+#[derive(Debug, Deserialize)]
+struct InspectViewingKeyRequest {
+    /// The recipient's Unified viewing key (incoming `uivk…`/`uvi…` or full
+    /// `uview…`/`uvf…`). Used in-process and never stored or logged.
+    viewing_key: String,
+    /// Optional network. Defaults to the engine's configured network.
+    #[serde(default)]
+    network: Option<String>,
+    /// Optional recipient address. When supplied, the engine reports whether the
+    /// key can derive one of that address's shielded receivers, which is what
+    /// binds a key to the request it may verify.
+    #[serde(default)]
+    expected_address: Option<String>,
+}
+
+async fn inspect_viewing_key(
+    State(state): State<AppState>,
+    Json(req): Json<InspectViewingKeyRequest>,
+) -> Result<Json<blink_zcash::ViewingKeyInspection>, ApiError> {
+    let network = match req.network {
+        Some(n) => BlinkNetwork::parse(&n)?,
+        None => state.network,
+    };
+    let inspection = blink_zcash::inspect_viewing_key(
+        &req.viewing_key,
+        network,
+        req.expected_address.as_deref(),
+    )?;
+    Ok(Json(inspection))
+}
+
 fn app(state: AppState) -> Router {
     Router::new()
         .route("/health", get(health))
@@ -280,6 +311,7 @@ fn app(state: AppState) -> Router {
         .route("/v1/zip321/parse", post(parse))
         .route("/v1/transaction/inspect", post(inspect_transaction))
         .route("/v1/transaction/verify-shielded", post(verify_shielded))
+        .route("/v1/viewing-key/inspect", post(inspect_viewing_key))
         .layer(TraceLayer::new_for_http())
         .with_state(state)
 }
