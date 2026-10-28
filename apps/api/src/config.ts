@@ -60,11 +60,16 @@ const schema = z.object({
   ZCASH_RPC_PASSWORD: z.string().optional().default(''),
 
   /**
-   * The recipient's Unified *viewing* key (`uivk…`/`uview…`, or their `…test`
-   * forms), used to cryptographically verify that a transaction actually paid the
-   * requested shielded recipient — by trial-decrypting the transaction's shielded
-   * outputs. This is the only way BLINK can prove a shielded recipient was paid;
-   * without it, a shielded settlement stays "plausible but unverified".
+   * The recipient's Unified *viewing* key, used to cryptographically verify that
+   * a transaction actually paid the requested shielded recipient — by
+   * trial-decrypting the transaction's shielded outputs. This is the only way
+   * BLINK can prove a shielded recipient was paid; without it, a shielded
+   * settlement stays "plausible but unverified".
+   *
+   * All four ZIP 316 prefixes are accepted: R0 `uivk…`/`uview…` and R2
+   * `uvi…`/`uvf…` (the `…test` forms for testnet). Wallets most commonly export
+   * the full key (`uview…`/`uvf…`), so both the incoming and full forms are
+   * supported.
    *
    * Server-side only and optional. It is a viewing key, never a spending key: it
    * cannot move funds. It is never logged, never returned by any route and never

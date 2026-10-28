@@ -216,9 +216,10 @@ struct VerifyShieldedRequest {
     /// default is used.
     #[serde(default)]
     branch: Option<String>,
-    /// The recipient's Unified viewing key (`uivk…`/`uview…`). A viewing key can
-    /// only *detect* incoming notes; it cannot spend. It is used in-process and
-    /// never stored or logged by the engine.
+    /// The recipient's Unified viewing key, either the incoming (`uivk…`/`uvi…`)
+    /// or full (`uview…`/`uvf…`) form. A viewing key can only *detect* incoming
+    /// notes; it cannot spend. It is used in-process and never stored or logged
+    /// by the engine.
     viewing_key: String,
     /// The expected recipient address. A note is only attributed to it when the
     /// decrypted recipient is byte-for-byte this address.
