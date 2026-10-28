@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>BLINK — ZECATHON demo</title>
+<style>
+  :root{--navy:#0b1b33;--navy2:#112644;--gold:#c9a24a;--ink:#e8eefc;--mut:#b4c0d4}
+  *{box-sizing:border-box}
+  body{margin:0;background:linear-gradient(180deg,var(--navy),var(--navy2));color:var(--ink);
+       font:16px/1.6 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif}
+  .wrap{max-width:960px;margin:0 auto;padding:28px 18px 64px}
+  .kicker{letter-spacing:.18em;text-transform:uppercase;font-size:12px;color:var(--gold);font-weight:700}
+  h1{font-size:34px;line-height:1.15;margin:8px 0 6px}
+  h1 .b{color:#fff}
+  .sub{color:var(--mut);margin:0 0 22px}
+  .bar{width:90px;height:5px;background:var(--gold);border-radius:3px;margin:0 0 22px}
+  video{width:100%;height:auto;border-radius:14px;background:#000;display:block;
+        box-shadow:0 18px 50px rgba(0,0,0,.45)}
+  .row{display:flex;gap:12px;flex-wrap:wrap;margin:18px 0 6px}
+  a.btn{display:inline-block;padding:12px 18px;border-radius:10px;text-decoration:none;font-weight:600}
+  .p{background:var(--gold);color:#1a1204}
+  .g{border:1px solid #3a4d6e;color:var(--ink)}
+  .meta{color:var(--mut);font-size:14px;margin:10px 0 0}
+  .facts{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px;margin:26px 0 0}
+  .card{background:#13294a;border:1px solid #23385c;border-radius:12px;padding:14px 16px}
+  .card b{color:var(--gold)}
+  .shot{margin:26px 0 0}
+  .shot img{width:100%;border-radius:12px;border:1px solid #23385c}
+  .cap{color:var(--mut);font-size:13px;margin:8px 0 0}
+  footer{margin-top:34px;color:var(--mut);font-size:13px;border-top:1px solid #23385c;padding-top:16px}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="kicker">ZECATHON · Shielded Payments track</div>
+  <h1><span class="b">BLINK</span> — shielded payment requests with evidence-based settlement</h1>
+  <div class="bar"></div>
+  <p class="sub">Non-custodial Zcash payment requests built on ZIP 321. A transaction is not a
+  settlement: only evidence of the exact recipient and amount can confirm a payment.</p>
+  <video controls playsinline preload="metadata" poster="https://cdn.jsdelivr.net/gh/itzebe/blink-zcash@gh-pages/poster.png">
+    <source src="https://cdn.jsdelivr.net/gh/itzebe/blink-zcash@gh-pages/blink-zecathon-demo.mp4" type="video/mp4">
+    Your browser cannot play this video.
+    <a href="https://cdn.jsdelivr.net/gh/itzebe/blink-zcash@gh-pages/blink-zecathon-demo.mp4">Download the demo (MP4)</a>.
+  </video>
+  <div class="row">
+    <a class="btn p" href="https://cdn.jsdelivr.net/gh/itzebe/blink-zcash@gh-pages/blink-zecathon-demo.mp4" download>Download MP4 (19 MB)</a>
+    <a class="btn g" href="https://blink-web-bgkz.onrender.com/" target="_blank" rel="noopener">Open the live app</a>
+    <a class="btn g" href="https://github.com/itzebe/blink-zcash" target="_blank" rel="noopener">Source code</a>
+  </div>
+  <p class="meta">1080p · 2 min 27 s · narration and captions. Footage recorded from the live
+  production app on Zcash mainnet.</p>
+  <div class="facts">
+    <div class="card"><b>Mainnet-only</b><br>Real mainnet addresses, ZIP 321 URIs and verification.</div>
+    <div class="card"><b>Fails closed</b><br>No recipient+amount evidence → no CONFIRMED, no receipt (HTTP 409).</div>
+    <div class="card"><b>Non-custodial</b><br>Never holds funds; never asks for a seed phrase or spending key.</div>
+  </div>
+  <div class="shot">
+    <img src="https://cdn.jsdelivr.net/gh/itzebe/blink-zcash@gh-pages/gate.png" alt="A transaction is not a settlement: OBSERVED vs CONFIRMED">
+    <p class="cap">Depth alone never settles a request — from the recorded demo.</p>
+  </div>
+  <div class="shot">
+    <img src="https://cdn.jsdelivr.net/gh/itzebe/blink-zcash@gh-pages/evidence.png" alt="The settlement gate: evidence must show the exact recipient and amount">
+    <p class="cap">The settlement gate, exercised end to end with a real Orchard mainnet transaction.</p>
+  </div>
+  <footer>
+    BLINK is an interface, not a custodian. It cannot move funds on your behalf and does not claim
+    more privacy than the Zcash protocol provides.
+  </footer>
+</div>
+</body>
+</html>
