@@ -35,6 +35,37 @@ PR #29 and PR #30 each passed all three required checks on their exact head SHA:
 - `TypeScript — lint, typecheck, build, test`
 - `Playwright end-to-end`
 
+## End-to-end settlement proof (real stack, no funds moved)
+
+The gate is exercised end to end against a **cryptographically-real** Orchard
+mainnet transaction built with the same official Zcash crates the engine uses,
+driven through the **real** `LightwalletdProvider` (only the gRPC transport is
+stubbed, because no funded mainnet note exists for a fixture), the **real** Rust
+engine over HTTP, the **real** Fastify app and a **real** PostgreSQL database.
+The recipient viewing key is the real UIVK/UFVK for that note.
+
+| Scenario | Result |
+| --- | --- |
+| Correct UIVK + exact recipient + exact amount | `recipientVerified:true`, `amountVerified:true` → API `CONFIRMED`, receipt `200` |
+| Correct UFVK (`uvf…`) for the same account | verifies identically |
+| Wrong recipient (same key, different address) | `recipientVerified:false` |
+| Underpayment (expected amount + 1 zatoshi) | `recipientVerified:true`, `amountVerified:false` |
+| No viewing key (full depth, 11 confirmations) | no `shieldedVerification`; API stays `OBSERVED`, receipt `409` |
+| Malformed key | HTTP `422 invalid_viewing_key` |
+
+This is the strongest evidence obtainable without sending real funds: it proves
+that confirmation depth alone cannot settle, that only recipient+amount evidence
+can, and that wrong or missing evidence fails closed. It is **not** a real
+mainnet payment — no funds were sent.
+
+Supporting suites (all green, run locally against the merged head):
+
+- Rust engine, real Zcash crates: `17 passed` (trial-decrypt, wrong recipient,
+  underpayment, wrong txid, wrong key, wrong network).
+- API integration, real PostgreSQL: `221 passed`.
+- Real mainnet read-only decode through a live lightwalletd (`zec.rocks`):
+  `15/15` checks, no broadcast.
+
 ## Independently observed production behaviour
 
 Read-only. No funds moved, no payment created, no settings changed.
@@ -92,3 +123,34 @@ curl -s $API/v1/payment-requests/zzzzzz/receipt
 Set `BLINK_RECIPIENT_VIEWING_KEY` (a recipient Unified viewing key, server-side
 only, in the Render Dashboard) on `blink-api`. The key is never logged, never
 returned by any route and never stored. This is an operator action.
+
+The variable is declared in `render.yaml` (`sync: false`), so Render prompts for
+it in the Dashboard and, importantly, a blueprint sync will not prune it. Set it
+in the Dashboard; do not commit it.
+
+### Exact key format (ZIP 316)
+
+A Unified viewing key's human-readable prefix encodes its revision and kind
+([ZIP 316](https://zips.z.cash/zip-0316)):
+
+| Revision | Incoming (detects deposits) | Full (in + out) |
+| --- | --- | --- |
+| R0 | `uivk…` | `uview…` |
+| R2 | `uvi…` | `uvf…` |
+
+On mainnet use the bare prefix; on testnet the prefix carries a `test` suffix
+(`uvitest…`, `uvftest…`, …). Either kind works for BLINK (a full viewing key is
+accepted and behaves identically for incoming detection), and the boot guardrail
+in `config.ts` rejects a key whose prefix does not match `ZCASH_NETWORK`.
+
+Official export path: Zallet exposes `z_exportviewingkey` (Unified Address →
+`uview…`; add `ivk=true` → `uivk…`); see the
+[Zallet RPC reference](https://github.com/zcash/zallet/blob/main/book/src/rpc/methods.md).
+BLINK requires a **viewing** key, never a spending key.
+
+### Confirm it took effect
+
+```bash
+curl -s https://blink-api-j75b.onrender.com/v1/meta/network
+#  -> recipientViewingKeyConfigured:true
+```
