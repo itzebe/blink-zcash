@@ -43,7 +43,8 @@ stores. Do not put a secret in a memo.
 
 BLINK can cryptographically verify that a shielded transaction paid the intended
 recipient. To do so an operator may provision a **recipient's Unified viewing
-key** (`BLINK_RECIPIENT_VIEWING_KEY`, `uivk…`/`uview…`, or the `…test` forms) on
+key** (`BLINK_RECIPIENT_VIEWING_KEY`; all four ZIP 316 prefixes are accepted —
+R0 `uivk…`/`uview…` and R2 `uvi…`/`uvf…`, or the `…test` forms for testnet) on
 the API. This is a *viewing* key, never a spending key: it can detect incoming
 notes but cannot move funds. It is:
 
