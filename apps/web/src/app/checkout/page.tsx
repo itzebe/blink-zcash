@@ -15,6 +15,7 @@ import { VerificationBadge } from '@/components/VerificationBadge';
 import { useConnection } from '@/components/ConnectionProvider';
 import { api, ApiError, type CreatedPaymentRequest, type PublicPaymentRequest } from '@/lib/api';
 import { purposeLabel } from '@/lib/status';
+import { summarizeVerification } from '@/lib/verification';
 import { previewRecipient } from '@/lib/privacy-preview';
 import { addWorkspaceEntry, saveManagementToken } from '@/lib/workspace';
 
@@ -40,7 +41,7 @@ function previewZec(usd: string, price: string | null): string | null {
  * rest of the app uses; there is no parallel payment path.
  */
 export default function CheckoutPage() {
-  const { network, ready } = useConnection();
+  const { network, ready, recipientViewingKeyConfigured } = useConnection();
 
   const [recipientName, setRecipientName] = useState('');
   const [recipientAddress, setRecipientAddress] = useState('');
@@ -204,6 +205,14 @@ export default function CheckoutPage() {
   }
 
   const confirmed = status === 'CONFIRMED';
+  // Distinguish "the transaction is confirmed" from "the recipient and amount
+  // were verified". A confirmed charge whose shielded settlement is not
+  // attributed to the recipient must not read as a fully verified sale.
+  const verification = summarizeVerification(current?.shieldedVerification ?? null, {
+    status,
+    keyConfigured: recipientViewingKeyConfigured,
+  });
+  const verified = confirmed && verification.verified;
 
   return (
     <AppFrame>
@@ -211,7 +220,7 @@ export default function CheckoutPage() {
         <div className="stack checkout">
           <div className="stack stack--sm" style={{ textAlign: 'center' }}>
             <p className="kicker">{purposeLabel(current.purpose)}</p>
-            <h1>{confirmed ? 'Payment received' : 'Charge in progress'}</h1>
+            <h1>{confirmed ? (verified ? 'Payment received and verified' : 'Payment received') : 'Charge in progress'}</h1>
           </div>
 
           <div className="checkout__grid">
@@ -238,7 +247,17 @@ export default function CheckoutPage() {
               <StatusPanel status={status ?? 'WAITING_FOR_PAYMENT'} confirmations={current.confirmations} />
 
               {current.shieldedVerification ? (
-                <VerificationBadge record={current.shieldedVerification} />
+                <VerificationBadge
+                  record={current.shieldedVerification}
+                  options={{ status, keyConfigured: recipientViewingKeyConfigured }}
+                />
+              ) : null}
+
+              {confirmed && !verification.verified ? (
+                <Alert kind="info">
+                  The transaction is confirmed, but the recipient and amount were not verified for
+                  this shielded payment. Confirmation alone does not establish who was paid.
+                </Alert>
               ) : null}
 
               {confirmed ? (

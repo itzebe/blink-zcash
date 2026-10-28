@@ -103,6 +103,37 @@ async function create(overrides: Record<string, unknown> = {}) {
   return { status: res.statusCode, body: res.json() };
 }
 
+/** A stub observation with viewing-key evidence that settles a shielded request. */
+function settledObservation(txid: string, confirmations = 3, amountZatoshis = 25000000) {
+  return {
+    txid,
+    confirmations,
+    broadcast: true,
+    source: 'stub',
+    evidence: {
+      txid,
+      size: 1000,
+      pools: { transparent: false, sapling: true, orchard: false, shielded: true },
+      recipientHasTransparent: false,
+      recipientHasShielded: true,
+      transparentRecipientZatoshis: null,
+    },
+    shieldedVerification: {
+      txid,
+      txidMatches: true,
+      recipientVerified: true,
+      recipientZatoshis: amountZatoshis,
+      amountVerified: true,
+      expectedZatoshis: amountZatoshis,
+      sapling: true,
+      orchard: false,
+      poolsWithRecipientNotes: ['sapling'],
+      keyHasSapling: true,
+      keyHasOrchard: false,
+    },
+  };
+}
+
 async function rawRow(shortCode: string) {
   const { rows } = await built.db.execute(
     sql`SELECT * FROM payment_requests WHERE short_code = ${shortCode} LIMIT 1`,
@@ -211,7 +242,7 @@ describe('public surfaces never expose the recipient address', () => {
       url: `/v1/payment-requests/${code}/transactions`,
       payload: { txid },
     });
-    provider.next = { txid, confirmations: 3, broadcast: true, source: 'stub' };
+    provider.next = settledObservation(txid, 3);
     await built.app.inject({
       method: 'POST',
       url: `/v1/payment-requests/${code}/verify`,

@@ -335,13 +335,28 @@ Verified against **real mainnet data without sending funds**:
 - a fabricated txid never confirms (`observed: false`) and a receipt is only
   issued for a `CONFIRMED` request.
 
-What has **not** been performed is a real funded mainnet payment (a newly signed
-and broadcast mainnet transaction from a funded wallet). That requires a funded
-mainnet wallet on the payer's device; BLINK never holds, signs, or broadcasts
-funds. The lightwalletd endpoint must serve the selected network — the provider
-checks `GetLightdInfo.chainName` (`test` for testnet, `main` for mainnet) and
-refuses to observe otherwise. BLINK does not hard-code or endorse any
-third-party endpoint; validate one before relying on it.
+The operator has confirmed that a real Zcash **mainnet transaction was completed
+successfully**. This is a **user-reported** fact, recorded without a committed
+transaction id (a mainnet txid is a public record that would link a request to
+on-chain activity).
+
+Independently, and without sending funds, the read-only mainnet check
+(`scripts/mainnet-readonly-check.mjs`) passes **15/15** against real mainnet
+data: it decodes a genuine shielded (Orchard) mainnet transaction, binds the
+txid, confirms shielded-pool activity exposes no transparent amount, rejects
+unknown/mismatched/wrong-network/malformed inputs, and enforces the shielded-only
+receiver policy. See [`docs/mainnet-verification.md`](docs/mainnet-verification.md).
+
+What has **not** been independently established is a **settled shielded payment**
+to a specific recipient: a shielded recipient and amount are private, so a
+transaction existing is not a settlement. BLINK marks such a request `OBSERVED`
+(never `CONFIRMED`, never a receipt) unless a recipient viewing key
+trial-decrypts the transaction to the exact requested address and amount.
+BLINK never holds, signs, or broadcasts funds; a funded mainnet wallet stays on
+the payer's device. The lightwalletd endpoint must serve the selected network —
+the provider checks `GetLightdInfo.chainName` (`test` for testnet, `main` for
+mainnet) and refuses to observe otherwise. BLINK does not hard-code or endorse
+any third-party endpoint; validate one before relying on it.
 
 Create the database and apply migrations:
 
