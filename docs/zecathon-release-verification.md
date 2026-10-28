@@ -124,9 +124,12 @@ Set `BLINK_RECIPIENT_VIEWING_KEY` (a recipient Unified viewing key, server-side
 only, in the Render Dashboard) on `blink-api`. The key is never logged, never
 returned by any route and never stored. This is an operator action.
 
-The variable is declared in `render.yaml` (`sync: false`), so Render prompts for
-it in the Dashboard and, importantly, a blueprint sync will not prune it. Set it
-in the Dashboard; do not commit it.
+The variable is declared in `render.yaml` (`sync: false`), so the requirement is
+visible in infrastructure-as-code and a rebuilt Blueprint prompts for it, while
+its value lives only in the Render Dashboard. Set it in the Dashboard; do not
+commit it. Per Render's Blueprint docs, `sync: false` values are not included in
+preview environments and are ignored on Blueprint updates, so the Dashboard value
+is the source of truth.
 
 ### Exact key format (ZIP 316)
 

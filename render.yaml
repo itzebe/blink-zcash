@@ -141,11 +141,11 @@ services:
       # receipt: the provider trial-decrypts the transaction's shielded outputs
       # and requires a note addressed to the exact requested recipient and
       # amount. Without it a shielded request can only ever reach OBSERVED. A
-      # viewing key cannot spend. It must be declared here: Render's blueprint
-      # sync prunes env vars the blueprint does not list, so a key set only in
-      # the Dashboard would be removed on the next sync. Paste a mainnet
-      # Unified viewing key (R0 `uivk…`/`uview…` or R2 `uvi…`/`uvf…`) in the
-      # Dashboard. Never a spending key, never a `…test` key on mainnet.
+      # viewing key cannot spend. Declared here so the requirement is visible in
+      # infrastructure-as-code and a rebuilt Blueprint prompts for it; because
+      # it is `sync: false` its value lives only in the Dashboard, never in
+      # source. Paste a mainnet Unified viewing key (R0 `uivk…`/`uview…` or R2
+      # `uvi…`/`uvf…`). Never a spending key, never a `…test` key on mainnet.
       - key: BLINK_RECIPIENT_VIEWING_KEY
         sync: false
       # Public base URL of the web app (used to build share links). Paste the
