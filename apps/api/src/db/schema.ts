@@ -53,6 +53,15 @@ export const paymentRequests = pgTable(
     recipientAddressKind: text('recipient_address_kind'),
     /** Non-sensitive fingerprint (truncated SHA-256) for display/debugging. */
     recipientAddressFingerprint: text('recipient_address_fingerprint'),
+    /**
+     * AES-256-GCM ciphertext of the request's own recipient Unified viewing key,
+     * when the requester supplied one. This is what makes verification
+     * multi-user: each request can carry the key that can detect its own
+     * incoming payment, instead of relying on a single operator-configured key.
+     * A viewing key can only detect incoming notes; it can never spend. Stored
+     * encrypted and never returned by any route.
+     */
+    recipientViewingKeyEncrypted: text('recipient_viewing_key_encrypted'),
     amount: text('amount').notNull(),
     currency: text('currency').notNull().default('ZEC'),
     /**

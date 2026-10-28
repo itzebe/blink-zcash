@@ -78,6 +78,14 @@ export interface VerifyContext {
    * verification to report whether the recovered amount matched exactly.
    */
   expectedZatoshis?: number;
+  /**
+   * The request's own recipient Unified viewing key, when the requester supplied
+   * one. This makes verification multi-user: the key travels with the request
+   * instead of relying on a single operator-configured key. When present it
+   * takes precedence over any operator-configured key. Server-side only; never
+   * logged or returned.
+   */
+  recipientViewingKey?: string;
 }
 
 export interface VerificationProvider {
@@ -394,13 +402,17 @@ export class LightwalletdProvider implements VerificationProvider {
     expectedAddress: string | undefined,
     expectedZatoshis: number | undefined,
     expectedTxid: string | undefined,
+    requestViewingKey: string | undefined,
   ): Promise<ShieldedPaymentVerification | undefined> {
     if (!this.engine || !this.engine.configured) return undefined;
-    if (!this.recipientViewingKey || !expectedAddress) return undefined;
+    // A per-request key (multi-user) takes precedence over the operator's
+    // configured key; either can verify the recipient of the transaction.
+    const viewingKey = requestViewingKey?.trim() || this.recipientViewingKey;
+    if (!viewingKey || !expectedAddress) return undefined;
     try {
       const result = await this.engine.verifyShielded(data.toString('hex'), {
         network: this.network,
-        viewingKey: this.recipientViewingKey,
+        viewingKey,
         expectedAddress,
         ...(expectedZatoshis !== undefined ? { expectedZatoshis } : {}),
         // Bind the decoded bytes to the observed txid at the engine level too, so
@@ -418,7 +430,8 @@ export class LightwalletdProvider implements VerificationProvider {
   }
 
   async observe(context: VerifyContext): Promise<Observation | null> {
-    const { claimedTxid, network, expectedAddress, expectedZatoshis } = context;
+    const { claimedTxid, network, expectedAddress, expectedZatoshis, recipientViewingKey } =
+      context;
     // Wrong network for this provider: never observe, never guess.
     if (network !== this.network) return null;
     if (!claimedTxid || !/^[0-9a-fA-F]{64}$/.test(claimedTxid)) return null;
@@ -476,6 +489,7 @@ export class LightwalletdProvider implements VerificationProvider {
         expectedAddress,
         expectedZatoshis,
         txid,
+        recipientViewingKey,
       );
 
       return {

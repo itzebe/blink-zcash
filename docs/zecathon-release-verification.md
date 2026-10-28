@@ -157,3 +157,48 @@ BLINK requires a **viewing** key, never a spending key.
 curl -s https://blink-api-j75b.onrender.com/v1/meta/network
 #  -> recipientViewingKeyConfigured:true
 ```
+
+## Per-request viewing keys (multi-user)
+
+The operator key above only lets BLINK verify the *operator's* own payments. A
+public payment-request app serves many recipients, so a request may now carry its
+own recipient Unified viewing key, bound to that request's recipient:
+
+- On create, the engine checks the key can re-derive one of the recipient's
+  shielded receivers. A key for another account is refused (`400
+  viewing_key_mismatch`); a malformed or wrong-network key is refused (`400
+  invalid_viewing_key`). Nothing is stored to fail silently later.
+- The key is AES-256-GCM encrypted at rest (`recipient_viewing_key_encrypted`),
+  never returned by any route and never in `toPublic`.
+- On verify, the request's key takes precedence over the operator key.
+- No key supplied: unchanged — a shielded request can only reach `OBSERVED`.
+
+`isSettlementEvidence` is unchanged: confirmation depth still never settles a
+request. Only recipient+amount evidence does, whether it came from the operator
+key or a per-request key.
+
+### Post-deploy checks (read-only; no funds, no payment created)
+
+```bash
+API=https://blink-api-j75b.onrender.com
+ENG=https://blink-engine-4em8.onrender.com
+
+# 1. Which revision is live. Absent/null before this release; a 12-char SHA after.
+curl -s $API/health | grep -o '"revision":"[^"]*"'
+
+# 2. The engine now exposes the key-inspection route (404 before this release).
+#    A malformed key fails closed with 422, never "valid".
+curl -s -o /dev/null -w '%{http_code}\n' -X POST $ENG/v1/viewing-key/inspect \
+  -H 'content-type: application/json' -d '{"viewing_key":"not-a-key"}'
+#  -> 422
+
+# 3. Depth alone cannot settle: a request with no key, given a deep confirmation,
+#    stays OBSERVED and its receipt is 409 (never 200).
+curl -s -o /dev/null -w '%{http_code}\n' $API/v1/payment-requests/<code>/receipt
+#  -> 409 until settlement evidence exists
+```
+
+A configured key is a *precondition* for a receipt, not proof of settlement. A
+`CONFIRMED` status is only meaningful with a valid settlement record, which
+requires a real trial-decrypt of a note to the exact requested recipient and
+amount.

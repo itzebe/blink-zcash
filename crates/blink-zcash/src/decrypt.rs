@@ -118,6 +118,84 @@ impl RecipientViewingKey {
             orchard: self.has_orchard(),
         }
     }
+
+    /// Whether this key can derive a shielded receiver of `address`.
+    ///
+    /// A Unified viewing key is scoped to a whole *account*, so a key that
+    /// belongs to the account behind `address` can re-derive at least one of the
+    /// address's shielded receivers; a key for any other account derives none of
+    /// them. This is what binds a supplied key to the request's recipient, so a
+    /// requester cannot attach a key that could never verify the payment.
+    ///
+    /// It only ever returns `true` on a byte-for-byte receiver match, and never
+    /// treats "the key is well-formed" as "the key belongs here".
+    pub fn matches_address(&self, address: &str) -> Result<bool> {
+        let parsed = ZcashAddress::try_from_encoded(address)
+            .map_err(|e| Error::AddressParse(e.to_string()))?;
+        let expected = parsed
+            .convert::<ShieldedRecipient>()
+            .map_err(|_| Error::Payment("recipient has no shielded receiver".to_string()))?;
+
+        if let (Some(ivk), Some(bytes)) = (self.sapling.as_ref(), expected.sapling) {
+            if let Some(addr) = sapling_crypto::PaymentAddress::from_bytes(&bytes) {
+                // Re-derive the address from the key's diversifier and compare.
+                if ivk.address(*addr.diversifier()).as_ref() == Some(&addr) {
+                    return Ok(true);
+                }
+            }
+        }
+        if let (Some(ivk), Some(bytes)) = (self.orchard.as_ref(), expected.orchard) {
+            if let Some(addr) = orchard::Address::from_raw_address_bytes(&bytes).into_option() {
+                if ivk.diversifier_index(&addr).is_some() {
+                    return Ok(true);
+                }
+            }
+        }
+        Ok(false)
+    }
+}
+
+/// A non-secret summary of a supplied Unified viewing key, returned by the engine
+/// so the API can validate a key *before* associating it with a request. It never
+/// contains key material.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ViewingKeyInspection {
+    /// Always `true` when the call succeeds: an unparseable key is an error, not
+    /// an inspection with `valid: false`.
+    pub valid: bool,
+    /// The network the key is scoped to (`mainnet`/`testnet`).
+    pub network: String,
+    /// Whether the key can decrypt Sapling notes.
+    pub sapling: bool,
+    /// Whether the key can decrypt Orchard notes.
+    pub orchard: bool,
+    /// Whether the key can derive a shielded receiver of the supplied address.
+    /// `None` when no address was supplied.
+    pub address_matches_key: Option<bool>,
+}
+
+/// Parse a Unified viewing key and report its capability, and — when an address
+/// is supplied — whether the key can derive that address's shielded receiver.
+///
+/// An unparseable key, a wrong-network key, or a key with no shielded component
+/// is an `Err` (the caller must not associate it with a request).
+pub fn inspect_viewing_key(
+    encoded: &str,
+    network: BlinkNetwork,
+    expected_address: Option<&str>,
+) -> Result<ViewingKeyInspection> {
+    let key = RecipientViewingKey::parse(encoded, network)?;
+    let address_matches_key = match expected_address {
+        Some(address) => Some(key.matches_address(address)?),
+        None => None,
+    };
+    Ok(ViewingKeyInspection {
+        valid: true,
+        network: network.as_str().to_string(),
+        sapling: key.has_sapling(),
+        orchard: key.has_orchard(),
+        address_matches_key,
+    })
 }
 
 /// Which pools a viewing key can decrypt for. Reported to the operator before

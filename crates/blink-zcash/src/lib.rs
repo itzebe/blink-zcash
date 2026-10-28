@@ -30,7 +30,10 @@ use zcash_transparent::address::TransparentAddress;
 use zip321::{Payment, TransactionRequest};
 
 pub mod decrypt;
-pub use decrypt::{DecryptedNote, NoteDecryption, RecipientViewingKey, ViewingKeyCapability};
+pub use decrypt::{
+    inspect_viewing_key, DecryptedNote, NoteDecryption, RecipientViewingKey, ViewingKeyCapability,
+    ViewingKeyInspection,
+};
 
 pub const ZATOSHIS_PER_ZEC: u64 = 100_000_000;
 pub const MAX_ZEC: u64 = 21_000_000;

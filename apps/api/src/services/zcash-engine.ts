@@ -121,6 +121,37 @@ export interface ShieldedPaymentVerification {
   keyHasOrchard: boolean;
 }
 
+export interface InspectViewingKeyOptions {
+  network: ZcashNetwork;
+  /**
+   * The recipient's Unified viewing key. Server-side only: never logged, never
+   * returned to a client.
+   */
+  viewingKey: string;
+  /**
+   * The recipient address the key is to be associated with. When supplied, the
+   * engine reports whether the key can derive one of that address's shielded
+   * receivers.
+   */
+  expectedAddress?: string;
+}
+
+/**
+ * A non-secret summary of a Unified viewing key, as reported by the engine. It
+ * never contains key material.
+ */
+export interface ViewingKeyInspection {
+  valid: boolean;
+  network: ZcashNetwork;
+  sapling: boolean;
+  orchard: boolean;
+  /**
+   * Whether the key can derive a shielded receiver of the supplied address.
+   * `null` when no address was supplied.
+   */
+  addressMatchesKey: boolean | null;
+}
+
 export interface VerifyShieldedOptions {
   network: ZcashNetwork;
   /**
@@ -190,6 +221,17 @@ export interface ZcashEngine {
     dataHex: string,
     options: VerifyShieldedOptions,
   ): Promise<EngineResult<ShieldedPaymentVerification>>;
+  /**
+   * Validate a Unified viewing key and, when a recipient address is supplied,
+   * establish whether the key can derive one of that address's shielded
+   * receivers. This is what binds a supplied key to the request it may verify,
+   * so a requester cannot attach a key for a different account. It never
+   * fabricates an association: a key that cannot derive the address reports
+   * `addressMatchesKey: false`.
+   */
+  inspectViewingKey(
+    options: InspectViewingKeyOptions,
+  ): Promise<EngineResult<ViewingKeyInspection>>;
 }
 
 /**
@@ -537,6 +579,46 @@ export function createZcashEngine(
             : [],
           keyHasSapling: json.key_has_sapling === true,
           keyHasOrchard: json.key_has_orchard === true,
+        },
+        authoritative: true,
+      };
+    },
+
+    async inspectViewingKey(options) {
+      if (!configured) {
+        throw new EngineUnavailableError('BLINK_ZCASH_SERVICE_URL is not configured');
+      }
+      const json = await call<Record<string, unknown>>('/v1/viewing-key/inspect', {
+        viewing_key: options.viewingKey,
+        network: options.network,
+        ...(options.expectedAddress ? { expected_address: options.expectedAddress } : {}),
+      });
+
+      // Fail closed on a malformed body: a missing field must never be coerced
+      // into "the key is valid and matches the recipient".
+      if (
+        typeof json.valid !== 'boolean' ||
+        (json.network !== 'mainnet' && json.network !== 'testnet') ||
+        typeof json.sapling !== 'boolean' ||
+        typeof json.orchard !== 'boolean' ||
+        (json.address_matches_key !== null && typeof json.address_matches_key !== 'boolean')
+      ) {
+        throw new EngineUnavailableError(
+          'blink-zcash service returned a malformed viewing-key inspection response',
+          'unreachable',
+        );
+      }
+
+      return {
+        value: {
+          valid: json.valid,
+          network: json.network,
+          sapling: json.sapling,
+          orchard: json.orchard,
+          addressMatchesKey:
+            json.address_matches_key === null || json.address_matches_key === undefined
+              ? null
+              : json.address_matches_key,
         },
         authoritative: true,
       };
