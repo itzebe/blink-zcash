@@ -121,6 +121,14 @@ export interface CreateInput {
   purpose?: PaymentPurpose;
   memo?: string;
   expiryMinutes: number;
+  /**
+   * The recipient's own Unified viewing key (`uivk…`/`uview…`, or `uvi…`/`uvf…`;
+   * the `…test` forms on testnet). Optional. When supplied, BLINK can verify a
+   * shielded payment to *this* recipient; without it a shielded settlement can
+   * only ever reach OBSERVED. It is sent once over HTTPS, bound to the recipient
+   * address, and encrypted at rest. It is a viewing key: it cannot spend.
+   */
+  recipientViewingKey?: string;
 }
 
 export const api = {

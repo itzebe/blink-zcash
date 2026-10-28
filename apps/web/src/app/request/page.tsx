@@ -112,6 +112,8 @@ export default function RequestPage() {
   const [currency, setCurrency] = useState<RequestCurrency>('ZEC');
   const [amount, setAmount] = useState('');
   const [memo, setMemo] = useState('');
+  const [viewingKey, setViewingKey] = useState('');
+  const [showViewingKey, setShowViewingKey] = useState(false);
   const [expiryMinutes, setExpiryMinutes] = useState(30);
   const [mode, setMode] = useState<string | null>(null);
   const [purpose, setPurpose] = useState<PaymentPurpose>('invoice');
@@ -185,6 +187,7 @@ export default function RequestPage() {
         currency,
         purpose,
         ...(memo.trim() ? { memo: memo.trim() } : {}),
+        ...(viewingKey.trim() ? { recipientViewingKey: viewingKey.trim() } : {}),
         expiryMinutes,
       });
       setCreated(result);
@@ -202,6 +205,13 @@ export default function RequestPage() {
       if (err instanceof ApiError && err.code === 'engine_unavailable') {
         setError(
           'The Zcash validation service is still waking up. This can take about a minute — please try again.',
+        );
+      } else if (
+        err instanceof ApiError &&
+        (err.code === 'viewing_key_mismatch' || err.code === 'invalid_viewing_key')
+      ) {
+        setError(
+          'That viewing key does not belong to the address above, so it could never verify this payment. Check that you exported the key for the same wallet, then try again.',
         );
       } else {
         setError(err instanceof ApiError ? err.message : 'Something went wrong. Please try again.');
@@ -451,6 +461,38 @@ export default function RequestPage() {
             value={memo}
             onChange={(e) => setMemo(e.target.value)}
           />
+        </div>
+
+        <div className="field">
+          <label className="field__label" htmlFor="viewing-key">
+            Viewing key (optional)
+          </label>
+          <div className="amount-input">
+            <input
+              id="viewing-key"
+              className="input input--mono"
+              type={showViewingKey ? 'text' : 'password'}
+              placeholder={network === 'mainnet' ? 'uivk1… or uview1…' : 'uivktest1… or uviewtest1…'}
+              autoComplete="off"
+              spellCheck={false}
+              value={viewingKey}
+              onChange={(e) => setViewingKey(e.target.value)}
+            />
+            <button
+              type="button"
+              className="btn btn--ghost"
+              onClick={() => setShowViewingKey((v) => !v)}
+              aria-label={showViewingKey ? 'Hide viewing key' : 'Show viewing key'}
+            >
+              {showViewingKey ? 'Hide' : 'Show'}
+            </button>
+          </div>
+          <p className="tiny muted">
+            Paste your wallet&apos;s <strong>incoming viewing key</strong> so BLINK can prove this
+            payment reached <em>your</em> address. It is bound to the address above, encrypted at
+            rest, and never shown again. A viewing key cannot spend. Leave it blank to keep the
+            request private but unverifiable.
+          </p>
         </div>
 
         <div className="field">

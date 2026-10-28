@@ -683,3 +683,82 @@ fn malformed_sapling_data_is_an_error_not_a_fabricated_match() {
     );
     assert!(err.is_err(), "malformed bytes must error, never verify");
 }
+
+// --- Viewing-key / recipient association -----------------------------------
+//
+// A Unified viewing key is scoped to a whole account. `matches_address` must
+// report `true` only when the key can re-derive one of the address's shielded
+// receivers, so the API can refuse to attach a key that could never verify the
+// request's payment. These exercise the production `inspect_viewing_key` path.
+
+#[test]
+fn orchard_key_matches_its_own_account_address() {
+    let f = orchard_fixture();
+    let inspection = blink_zcash::inspect_viewing_key(&f.uivk, BlinkNetwork::Testnet, Some(&f.ua))
+        .expect("inspect");
+    assert!(inspection.valid);
+    assert!(inspection.orchard);
+    assert_eq!(inspection.address_matches_key, Some(true));
+}
+
+#[test]
+fn orchard_key_does_not_match_a_different_accounts_address() {
+    let f = orchard_fixture();
+    // The key belongs to account A; the address belongs to account B.
+    let inspection =
+        blink_zcash::inspect_viewing_key(&f.uivk, BlinkNetwork::Testnet, Some(&f.other_account_ua))
+            .expect("inspect");
+    assert_eq!(
+        inspection.address_matches_key,
+        Some(false),
+        "a key for another account must never be associated with this recipient"
+    );
+}
+
+#[test]
+fn orchard_key_matches_another_diversifier_under_the_same_account() {
+    let f = orchard_fixture();
+    // Same account, a different diversified receiver: still the same key's scope.
+    let inspection = blink_zcash::inspect_viewing_key(
+        &f.uivk,
+        BlinkNetwork::Testnet,
+        Some(&f.other_diversifier_ua),
+    )
+    .expect("inspect");
+    assert_eq!(inspection.address_matches_key, Some(true));
+}
+
+#[test]
+fn unified_full_viewing_key_matches_its_account_address() {
+    let f = orchard_fixture();
+    let ufvk = orchard_ufvk([3u8; 32]);
+    let inspection = blink_zcash::inspect_viewing_key(&ufvk, BlinkNetwork::Testnet, Some(&f.ua))
+        .expect("inspect");
+    assert_eq!(inspection.address_matches_key, Some(true));
+}
+
+#[test]
+fn inspection_without_an_address_reports_no_association() {
+    let f = orchard_fixture();
+    let inspection =
+        blink_zcash::inspect_viewing_key(&f.uivk, BlinkNetwork::Testnet, None).expect("inspect");
+    assert!(inspection.valid);
+    assert_eq!(inspection.address_matches_key, None);
+}
+
+#[test]
+fn malformed_viewing_key_is_rejected_not_reported_invalid() {
+    let err = blink_zcash::inspect_viewing_key("not-a-key", BlinkNetwork::Testnet, None);
+    assert!(err.is_err(), "an unparseable key must be an error");
+}
+
+#[test]
+fn wrong_network_viewing_key_is_rejected() {
+    let f = orchard_fixture();
+    // The fixture key is testnet; inspecting it as mainnet must fail.
+    let err = blink_zcash::inspect_viewing_key(&f.uivk, BlinkNetwork::Mainnet, Some(&f.ua));
+    assert!(
+        err.is_err(),
+        "a testnet key must not be accepted on mainnet"
+    );
+}

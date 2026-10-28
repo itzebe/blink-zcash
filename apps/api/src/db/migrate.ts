@@ -65,6 +65,11 @@ ALTER TABLE payment_requests ADD COLUMN IF NOT EXISTS privacy jsonb;
 ALTER TABLE payment_requests ADD COLUMN IF NOT EXISTS purpose text NOT NULL DEFAULT 'invoice';
 -- Additive migration for the honest shielded-payment verification result.
 ALTER TABLE payment_requests ADD COLUMN IF NOT EXISTS shielded_verification jsonb;
+-- Additive migration for per-request shielded verification: the request's own
+-- recipient Unified viewing key, AES-256-GCM encrypted at rest (like the
+-- recipient address). Enables multi-user verification without a single
+-- operator-configured key. Never returned by any route.
+ALTER TABLE payment_requests ADD COLUMN IF NOT EXISTS recipient_viewing_key_encrypted text;
 -- Privacy remediation: the ZIP 321 URI must not persist the recipient address in
 -- the clear. New rows store NULL here and the URI is reconstructed on demand from
 -- the encrypted address + fields. Make the column nullable (for databases created

@@ -46,6 +46,8 @@ class CountingEngine implements ZcashEngine {
   inspectCalls = 0;
   buildCalls = 0;
   decodeCalls = 0;
+  verifyCalls = 0;
+  inspectKeyCalls = 0;
 
   async ping(): Promise<boolean> {
     this.pingCalls += 1;
@@ -61,6 +63,18 @@ class CountingEngine implements ZcashEngine {
   }
   async decodeTransaction(): Promise<EngineResult<TransactionInfo>> {
     this.decodeCalls += 1;
+    throw new Error('keepalive must not call the Zcash engine');
+  }
+  async inspectTransaction(): Promise<never> {
+    this.inspectCalls += 1;
+    throw new Error('keepalive must not call the Zcash engine');
+  }
+  async verifyShielded(): Promise<never> {
+    this.verifyCalls += 1;
+    throw new Error('keepalive must not call the Zcash engine');
+  }
+  async inspectViewingKey(): Promise<never> {
+    this.inspectKeyCalls += 1;
     throw new Error('keepalive must not call the Zcash engine');
   }
 }
