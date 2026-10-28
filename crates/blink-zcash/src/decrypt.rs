@@ -76,14 +76,30 @@ impl RecipientViewingKey {
     /// check it belongs to the requested network. The ZIP 316 encoding carries the
     /// network, so a key minted for another network is rejected outright — a
     /// testnet key can never be used to verify a mainnet payment.
+    ///
+    /// Both the Unified Incoming Viewing Key (`uivk…`) and the Unified Full
+    /// Viewing Key (`uview…`) are accepted: wallets commonly export the full key,
+    /// and its incoming-viewing form is derived here. Either form can only detect
+    /// incoming notes. The two encodings carry distinct ZIP 316 prefixes, so a
+    /// string can only ever parse as one of them — the fallback is unambiguous.
     pub fn parse(encoded: &str, network: BlinkNetwork) -> Result<Self> {
         let trimmed = encoded.trim();
         if trimmed.is_empty() {
             return Err(Error::ViewingKey("viewing key is empty".to_string()));
         }
         let params = network_params(network);
-        let uivk = zcash_keys::keys::UnifiedIncomingViewingKey::decode(&params, trimmed)
-            .map_err(Error::ViewingKey)?;
+        let uivk = match zcash_keys::keys::UnifiedIncomingViewingKey::decode(&params, trimmed) {
+            Ok(uivk) => uivk,
+            Err(uivk_err) => {
+                let ufvk = zcash_keys::keys::UnifiedFullViewingKey::decode(&params, trimmed)
+                    .map_err(|ufvk_err| {
+                        Error::ViewingKey(format!(
+                            "not a Unified viewing key (UIVK: {uivk_err}; UFVK: {ufvk_err})"
+                        ))
+                    })?;
+                ufvk.to_unified_incoming_viewing_key()
+            }
+        };
         if !uivk.has_sapling() && !uivk.has_orchard() {
             return Err(Error::ViewingKey(
                 "viewing key carries no shielded (Sapling or Orchard) component".to_string(),

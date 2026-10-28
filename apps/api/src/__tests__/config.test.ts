@@ -93,6 +93,61 @@ describe('loadConfig verification guardrails', () => {
     ).toBe('uivk1qqqqqqqq');
   });
 
+  it('accepts ZIP 316 Revision 2 viewing key prefixes (uvi…/uvf…)', () => {
+    // The official `zcash_keys` crate emits R2 by default, so a modern wallet
+    // export uses `uvi…`/`uvf…` rather than the R0 `uivk…`/`uview…`.
+    expect(
+      loadConfig({ ...base, BLINK_RECIPIENT_VIEWING_KEY: 'uvitest1qqqqqqqq' })
+        .BLINK_RECIPIENT_VIEWING_KEY,
+    ).toBe('uvitest1qqqqqqqq');
+    expect(
+      loadConfig({ ...base, BLINK_RECIPIENT_VIEWING_KEY: 'uvftest1qqqqqqqq' })
+        .BLINK_RECIPIENT_VIEWING_KEY,
+    ).toBe('uvftest1qqqqqqqq');
+    expect(
+      loadConfig({
+        ...base,
+        NODE_ENV: 'production',
+        ZCASH_NETWORK: 'mainnet',
+        NEXT_PUBLIC_NETWORK: 'mainnet',
+        BLINK_ENCRYPTION_KEY: 'a'.repeat(64),
+        BLINK_VERIFICATION_PROVIDER: 'lightwalletd',
+        BLINK_LIGHTWALLETD_URL: 'https://zec.rocks:443',
+        BLINK_PRICE_PROVIDER: 'none',
+        BLINK_RECIPIENT_VIEWING_KEY: 'uvi1qqqqqqqq',
+      }).BLINK_RECIPIENT_VIEWING_KEY,
+    ).toBe('uvi1qqqqqqqq');
+    expect(
+      loadConfig({
+        ...base,
+        NODE_ENV: 'production',
+        ZCASH_NETWORK: 'mainnet',
+        NEXT_PUBLIC_NETWORK: 'mainnet',
+        BLINK_ENCRYPTION_KEY: 'a'.repeat(64),
+        BLINK_VERIFICATION_PROVIDER: 'lightwalletd',
+        BLINK_LIGHTWALLETD_URL: 'https://zec.rocks:443',
+        BLINK_PRICE_PROVIDER: 'none',
+        BLINK_RECIPIENT_VIEWING_KEY: 'uvf1qqqqqqqq',
+      }).BLINK_RECIPIENT_VIEWING_KEY,
+    ).toBe('uvf1qqqqqqqq');
+  });
+
+  it('refuses a testnet R2 viewing key on mainnet', () => {
+    expect(() =>
+      loadConfig({
+        ...base,
+        NODE_ENV: 'production',
+        ZCASH_NETWORK: 'mainnet',
+        NEXT_PUBLIC_NETWORK: 'mainnet',
+        BLINK_ENCRYPTION_KEY: 'a'.repeat(64),
+        BLINK_VERIFICATION_PROVIDER: 'lightwalletd',
+        BLINK_LIGHTWALLETD_URL: 'https://zec.rocks:443',
+        BLINK_PRICE_PROVIDER: 'none',
+        BLINK_RECIPIENT_VIEWING_KEY: 'uvftest1qqqqqqqq',
+      }),
+    ).toThrow(/mainnet Unified viewing key/);
+  });
+
   it('refuses mainnet with no verification provider in production', () => {
     expect(() =>
       loadConfig({
